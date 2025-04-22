@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 var build = "development"
@@ -24,7 +25,7 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	log.Info("startup", "status", "service starting")
+	log.Info("startup", "status", "service starting", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 	return nil
 }
 
