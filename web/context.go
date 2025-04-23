@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
@@ -25,8 +26,17 @@ func GetTraceID(ctx context.Context) uuid.UUID {
 	return trace
 }
 
-func setResponseStatus(ctx context.Context, statusCode int) context.Context {
+func injectResponseStatus(ctx context.Context, statusCode int) context.Context {
 	return context.WithValue(ctx, responseStatusKey, &statusCode)
+}
+
+func setResponseStatus(ctx context.Context, statusCode int) error {
+	p, ok := ctx.Value(responseStatusKey).(*int)
+	if !ok {
+		return errors.New("response status code not found in ctx")
+	}
+	*p = statusCode
+	return nil
 }
 
 func GetResponseStatus(ctx context.Context) int {

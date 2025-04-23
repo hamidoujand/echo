@@ -11,7 +11,9 @@ import (
 func Respond(ctx context.Context, w http.ResponseWriter, statusCode int, data any) error {
 
 	//set response status code
-	setResponseStatus(ctx, statusCode)
+	if err := setResponseStatus(ctx, statusCode); err != nil {
+		return fmt.Errorf("setResponseStatus: %w", err)
+	}
 
 	//check to see if client cancelled the request
 	if err := ctx.Err(); err != nil {

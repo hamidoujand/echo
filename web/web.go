@@ -36,6 +36,8 @@ func (a *App) HandleFunc(method string, version string, path string, handlerFunc
 		//set traceID
 		traceID := uuid.New()
 		ctx = setTraceID(ctx, traceID)
+		//only injects the response status code default to 0, inside Respond the correct status will be set.
+		ctx = injectResponseStatus(ctx, 0)
 
 		if err := handlerFunc(ctx, w, r); err != nil {
 			a.logger.Error("web application", "status", "failed to handle request", "err", err)
@@ -49,4 +51,8 @@ func (a *App) HandleFunc(method string, version string, path string, handlerFunc
 	}
 	pattern := fmt.Sprintf("%s %s", method, p)
 	a.mux.HandleFunc(pattern, h)
+}
+
+func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.mux.ServeHTTP(w, r)
 }
