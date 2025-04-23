@@ -11,6 +11,7 @@ import (
 type ctxKey int
 
 const traceIDKey ctxKey = 1
+const responseStatusKey ctxKey = 2
 
 func setTraceID(ctx context.Context, traceID uuid.UUID) context.Context {
 	return context.WithValue(ctx, traceIDKey, traceID)
@@ -22,4 +23,16 @@ func GetTraceID(ctx context.Context) uuid.UUID {
 		return uuid.UUID{}
 	}
 	return trace
+}
+
+func setResponseStatus(ctx context.Context, statusCode int) context.Context {
+	return context.WithValue(ctx, responseStatusKey, &statusCode)
+}
+
+func GetResponseStatus(ctx context.Context) int {
+	p, ok := ctx.Value(responseStatusKey).(*int)
+	if !ok {
+		return 0
+	}
+	return *p
 }
