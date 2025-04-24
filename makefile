@@ -9,3 +9,8 @@ upgrade:
 	go get -u -v ./... 
 	go mod tidy
 	go mod vendor
+
+
+client:
+	go run cmd/client/main.go 
+	

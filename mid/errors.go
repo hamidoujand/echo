@@ -15,10 +15,12 @@ func Error(log *slog.Logger) web.Middleware {
 	return func(next web.HandlerFunc) web.HandlerFunc {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			err := next(ctx, w, r)
+			//no error
 			if err == nil {
 				return nil
 			}
 
+			//we got an error
 			var appError *errs.Error
 			if errors.As(err, &appError) {
 				log.Error("handling app error during request",
@@ -26,6 +28,7 @@ func Error(log *slog.Logger) web.Middleware {
 					"source_file", filepath.Base(appError.Filename),
 					"function", filepath.Base(appError.FuncName),
 				)
+				return web.Respond(ctx, w, appError.Code, appError)
 			} else {
 				//log
 				log.Error("handling unknown error during request", "err", err)
@@ -34,7 +37,6 @@ func Error(log *slog.Logger) web.Middleware {
 				return web.Respond(ctx, w, http.StatusInternalServerError, err)
 			}
 
-			return nil
 		}
 	}
 }

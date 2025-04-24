@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -57,50 +56,6 @@ func (h Handler) connect(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return errs.New(http.StatusBadRequest, fmt.Errorf("failed to handshake: %w", err))
 	}
 	h.Logger.Info("handshake completed", "user", usr.Name)
-	// var wg sync.WaitGroup
-	// wg.Add(3)
-
-	// //ping goroutine
-	// go func() {
-	// 	defer wg.Done()
-	// 	//ticker used to send a ping over websocket
-	// 	ticker := time.NewTicker(time.Second)
-
-	// 	for {
-	// 		select {
-	// 		case <-ticker.C:
-	// 			if err := c.WriteMessage(websocket.TextMessage, []byte("PING")); err != nil {
-	// 				return
-	// 			}
-	// 		}
-	// 	}
-	// }()
-
-	// //reader goroutine
-	// go func() {
-	// 	defer wg.Done()
-
-	// 	for {
-	// 		_, msg, err := c.ReadMessage()
-	// 		if err != nil {
-	// 			return
-	// 		}
-
-	// 	}
-	// }()
-
-	// //writer goroutine
-	// go func() {
-	// 	defer wg.Done()
-	// 	//read messages from another channel
-
-	// }()
-
-	// wg.Wait()
-	//no content
-	if err := web.Respond(ctx, w, http.StatusNoContent, nil); err != nil {
-		return errs.New(http.StatusInternalServerError, errors.New("failed to respond"))
-	}
 	return nil
 }
 

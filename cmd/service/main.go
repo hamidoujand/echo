@@ -76,7 +76,7 @@ func run(log *slog.Logger) error {
 	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	server := &http.Server{
-		Handler:     http.TimeoutHandler(mux, cfg.Web.WriteTimeout, "timeout"),
+		Handler:     mux,
 		Addr:        cfg.Web.APIHost,
 		ReadTimeout: cfg.Web.ReadTimeout,
 		IdleTimeout: cfg.Web.IdleTimeout,
