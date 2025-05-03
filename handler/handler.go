@@ -9,6 +9,7 @@ import (
 	"github.com/hamidoujand/echo/chat"
 	"github.com/hamidoujand/echo/errs"
 	"github.com/hamidoujand/echo/mid"
+	"github.com/hamidoujand/echo/users"
 	"github.com/hamidoujand/echo/web"
 )
 
@@ -24,9 +25,11 @@ func Register(cfg Config) *web.App {
 	)
 	const version = "v1"
 
+	users := users.New(cfg.Logger)
+
 	h := Handler{
 		Logger: cfg.Logger,
-		chat:   chat.New(cfg.Logger),
+		chat:   chat.New(cfg.Logger, users),
 	}
 
 	app.HandleFunc(http.MethodGet, version, "/connect", h.connect)
