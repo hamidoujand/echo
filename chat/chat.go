@@ -100,22 +100,48 @@ func (c *Chat) Handshake(ctx context.Context, w http.ResponseWriter, r *http.Req
 	return usr, nil
 }
 
-func (c *Chat) sendMessage(usr User, msg inMessage) error {
-	to, err := c.users.Retrieve(usr.ID)
-	if err != nil {
-		return err
-	}
+func (c *Chat) Listen(ctx context.Context, usr User) {
+	for {
+		msg, err := c.readMessage(ctx, usr)
+		if err != nil {
+			switch v := err.(type) {
+			case *websocket.CloseError:
+				c.log.Error("client disconnected", "status", "reading message", "err", err)
+				return
+			case *net.OpError:
+				if !v.Temporary() {
+					c.log.Error("client disconnected", "status", "reading message", "err", err)
+					return
+				}
+				//if its temporary
+				continue
+			default:
+				//check for context cancelled
+				if errors.Is(err, context.Canceled) {
+					c.log.Error("client context is cancelled", "status", "reading message", "err", err)
+					return
+				}
 
-	m := outMessage{
-		From: User{ID: usr.ID, Name: usr.Name},
-		Text: msg.Text,
-	}
+				c.log.Error("error while reading message", "err", err)
+				continue
+			}
+		}
 
-	if err := to.Conn.WriteJSON(m); err != nil {
-		return fmt.Errorf("writing message: %w", err)
-	}
+		//create the inMessage
+		var in inMessage
+		if err := json.Unmarshal(msg, &in); err != nil {
+			c.log.Error("unmarshaling inMessage failed", "err", err)
+			continue
+		}
 
-	return nil
+		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage)
+
+		if err := c.sendMessage(usr, in); err != nil {
+			c.log.Error("sending message failed", "err", err)
+		}
+
+		c.log.Info("sent message", "from", usr.ID, "to", in.ToID)
+	}
 }
 
 func (c *Chat) pong(usrID uuid.UUID) func(appData string) error {
@@ -127,7 +153,7 @@ func (c *Chat) pong(usrID uuid.UUID) func(appData string) error {
 		}
 
 		diff := usr.LastPong.Sub(usr.LastPing)
-		c.log.Info("pong handler", "id", usr.ID, "took", diff)
+		c.log.Debug("pong handler", "id", usr.ID, "took", diff)
 
 		return nil
 	}
@@ -164,7 +190,7 @@ func (c *Chat) ping() {
 					c.log.Error("sending ping failed", "id", id, "err", err)
 				}
 
-				c.log.Info("ping handler,sent ping", "id", id)
+				c.log.Debug("ping handler,sent ping", "id", id)
 
 				if err := c.users.UpdateLastPing(id); err != nil {
 					c.log.Error("updating last ping failed", "id", id, "err", err)
@@ -172,46 +198,6 @@ func (c *Chat) ping() {
 			}
 		}
 	}()
-}
-
-func (c *Chat) Listen(ctx context.Context, usr User) {
-	for {
-		msg, err := c.readMessage(ctx, usr)
-		if err != nil {
-			switch v := err.(type) {
-			case *websocket.CloseError:
-				c.log.Error("client disconnected", "status", "reading message", "err", err)
-				return
-			case *net.OpError:
-				if !v.Temporary() {
-					c.log.Error("client disconnected", "status", "reading message", "err", err)
-					return
-				}
-				//if its temporary
-				continue
-			default:
-				//check for context cancelled
-				if errors.Is(err, context.Canceled) {
-					c.log.Error("client context is cancelled", "status", "reading message", "err", err)
-					return
-				}
-
-				c.log.Error("error while reading message", "err", err)
-				continue
-			}
-		}
-
-		//create the inMessage
-		var in inMessage
-		if err := json.Unmarshal(msg, &in); err != nil {
-			c.log.Error("unmarshaling inMessage failed", "err", err)
-			continue
-		}
-
-		if err := c.sendMessage(usr, in); err != nil {
-			c.log.Error("sending message failed", "err", err)
-		}
-	}
 }
 
 func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
@@ -222,9 +208,6 @@ func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
 
 	ch := make(chan response, 1)
 	go func() {
-		c.log.Info("started read message")
-		defer c.log.Info("completed read message")
-
 		_, msg, err := usr.Conn.ReadMessage()
 		if err != nil {
 			ch <- response{msg: nil, err: err}
@@ -247,4 +230,22 @@ func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
 
 		return resp.msg, nil
 	}
+}
+
+func (c *Chat) sendMessage(usr User, msg inMessage) error {
+	to, err := c.users.Retrieve(msg.ToID)
+	if err != nil {
+		return err
+	}
+
+	m := outMessage{
+		From: User{ID: usr.ID, Name: usr.Name},
+		Text: msg.Text,
+	}
+
+	if err := to.Conn.WriteJSON(m); err != nil {
+		return fmt.Errorf("writing message: %w", err)
+	}
+
+	return nil
 }
