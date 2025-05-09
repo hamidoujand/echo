@@ -9,12 +9,13 @@ import (
 	"github.com/hamidoujand/echo/chat"
 	"github.com/hamidoujand/echo/errs"
 	"github.com/hamidoujand/echo/mid"
-	"github.com/hamidoujand/echo/users"
 	"github.com/hamidoujand/echo/web"
 )
 
 type Config struct {
-	Logger *slog.Logger
+	Logger  *slog.Logger
+	Chat    *chat.Chat
+	Subject string
 }
 
 func Register(cfg Config) *web.App {
@@ -25,11 +26,9 @@ func Register(cfg Config) *web.App {
 	)
 	const version = "v1"
 
-	users := users.New(cfg.Logger)
-
 	h := Handler{
 		Logger: cfg.Logger,
-		chat:   chat.New(cfg.Logger, users),
+		chat:   cfg.Chat,
 	}
 
 	app.HandleFunc(http.MethodGet, version, "/connect", h.connect)

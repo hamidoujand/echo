@@ -25,6 +25,13 @@ type outMessage struct {
 	Text string `json:"text"`
 }
 
+type busMessage struct {
+	FromID   uuid.UUID `json:"fromID"`
+	FromName string    `json:"fromName"`
+	ToID     uuid.UUID `json:"toID"`
+	Text     string    `json:"text"`
+}
+
 type Connection struct {
 	Conn     *websocket.Conn
 	LastPong time.Time

@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/hamidoujand/echo/chat"
 	"github.com/hamidoujand/echo/handler"
+	"github.com/hamidoujand/echo/users"
+	"github.com/nats-io/nats.go"
 )
 
 var build = "development"
@@ -45,6 +48,11 @@ func run(log *slog.Logger) error {
 			ShutdownTimeout time.Duration `conf:"default:20s"`
 			APIHost         string        `conf:"default:0.0.0.0:8000"`
 		}
+		NATS struct {
+			Host    string `conf:"default:demo.nats.io"`
+			Name    string `conf:"default:cap"`
+			Subject string `conf:"default:cap"`
+		}
 	}{}
 
 	const prefix = "ECHO"
@@ -65,10 +73,25 @@ func run(log *slog.Logger) error {
 	log.Info("app configurations", "configs", cfgString)
 
 	log.Info("service starting", "GOMAXPROCS", runtime.GOMAXPROCS(0))
+	//------------------------------------------------------------------------------
+	//NATS
+	nc, err := nats.Connect(cfg.NATS.Host)
+	if err != nil {
+		return fmt.Errorf("nats connect: %w", err)
+	}
+	defer nc.Close()
+	users := users.New(log)
+
+	chat, err := chat.New(log, users, nc, cfg.NATS.Subject)
+	if err != nil {
+		return fmt.Errorf("creating chat obj: %w", err)
+	}
 	//---------------------------------------------------------------------------
 	//Mux
 	mux := handler.Register(handler.Config{
-		Logger: log,
+		Logger:  log,
+		Chat:    chat,
+		Subject: cfg.NATS.Subject,
 	})
 
 	errCh := make(chan error)

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/hamidoujand/echo/errs"
+	"github.com/nats-io/nats.go"
 )
 
 var (
@@ -30,19 +31,45 @@ type users interface {
 }
 
 type Chat struct {
-	log   *slog.Logger
-	users users
+	log     *slog.Logger
+	users   users
+	jsc     nats.JetStreamContext
+	sub     *nats.Subscription
+	subject string
 }
 
-func New(log *slog.Logger, users users) *Chat {
-	c := Chat{
-		log:   log,
-		users: users,
+func New(log *slog.Logger, users users, conn *nats.Conn, subject string) (*Chat, error) {
+	jsc, err := conn.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("create jetStream: %w", err)
 	}
 
-	c.ping()
+	_, err = jsc.AddStream(&nats.StreamConfig{
+		Name:     subject,
+		Subjects: []string{subject},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("adding stream: %w", err)
+	}
 
-	return &c
+	sub, err := jsc.SubscribeSync(subject)
+	if err != nil {
+		return nil, fmt.Errorf("subscribe: %w", err)
+	}
+
+	c := Chat{
+		log:     log,
+		users:   users,
+		jsc:     jsc,
+		sub:     sub,
+		subject: subject,
+	}
+
+	const maxWait = time.Second * 10
+	c.ping(maxWait)
+	c.listenBUS()
+
+	return &c, nil
 }
 
 func (c *Chat) Handshake(ctx context.Context, w http.ResponseWriter, r *http.Request) (User, error) {
@@ -88,7 +115,6 @@ func (c *Chat) Handshake(ctx context.Context, w http.ResponseWriter, r *http.Req
 	}
 
 	usr.Conn.SetPongHandler(c.pong(usr.ID))
-
 	//send an ack
 	ack := fmt.Sprintf("Welcome, %s", usr.Name)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(ack)); err != nil {
@@ -136,7 +162,26 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 
 		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage)
 
-		if err := c.sendMessage(usr, in); err != nil {
+		to, err := c.users.Retrieve(in.ToID)
+		if err != nil {
+			if errors.Is(err, ErrUserNotFound) {
+				//send to the BUS
+				m := busMessage{
+					FromID:   usr.ID,
+					FromName: usr.Name,
+					ToID:     in.ToID,
+					Text:     in.Text,
+				}
+
+				c.sendMessageToBUS(m)
+			} else {
+				c.log.Error("failed to retrieve the message's recipient", "err", err)
+			}
+
+			continue
+		}
+
+		if err := c.sendMessage(usr, to, in.Text); err != nil {
 			c.log.Error("sending message failed", "err", err)
 		}
 
@@ -161,8 +206,7 @@ func (c *Chat) pong(usrID uuid.UUID) func(appData string) error {
 	return h
 }
 
-func (c *Chat) ping() {
-	const maxWait = time.Second * 10
+func (c *Chat) ping(maxWait time.Duration) {
 	ticker := time.NewTicker(maxWait)
 	defer ticker.Stop()
 
@@ -232,15 +276,10 @@ func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
 	}
 }
 
-func (c *Chat) sendMessage(usr User, msg inMessage) error {
-	to, err := c.users.Retrieve(msg.ToID)
-	if err != nil {
-		return err
-	}
-
+func (c *Chat) sendMessage(from User, to User, msg string) error {
 	m := outMessage{
-		From: User{ID: usr.ID, Name: usr.Name},
-		Text: msg.Text,
+		From: User{ID: from.ID, Name: from.Name},
+		Text: msg,
 	}
 
 	if err := to.Conn.WriteJSON(m); err != nil {
@@ -248,4 +287,89 @@ func (c *Chat) sendMessage(usr User, msg inMessage) error {
 	}
 
 	return nil
+}
+
+func (c *Chat) sendMessageToBUS(msg busMessage) error {
+	bs, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshalling msg: %w", err)
+	}
+
+	_, err = c.jsc.Publish(c.subject, bs)
+	if err != nil {
+		return fmt.Errorf("publish: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Chat) listenBUS() {
+	go func() {
+		for {
+			msg, err := c.readMessageFromBUS(context.Background())
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+
+				c.log.Error("error while reading message", "err", err)
+				continue
+			}
+
+			//create the inMessage
+			var bm busMessage
+			if err := json.Unmarshal(msg.Data, &bm); err != nil {
+				c.log.Error("unmarshaling BUS message failed", "err", err)
+				continue
+			}
+
+			c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
+
+			to, err := c.users.Retrieve(bm.ToID)
+			if err != nil {
+				//not found in this cap
+				c.log.Error("recipient is not found in this CAP", "status", "not found", "err", err)
+				continue
+			}
+
+			from := User{
+				ID:   bm.FromID,
+				Name: bm.FromName,
+			}
+
+			if err := c.sendMessage(from, to, bm.Text); err != nil {
+				c.log.Error("sending message failed", "err", err)
+			}
+
+			c.log.Info("sent message", "from", bm.FromID, "to", to.ID)
+		}
+	}()
+}
+
+func (c *Chat) readMessageFromBUS(ctx context.Context) (*nats.Msg, error) {
+	type response struct {
+		msg *nats.Msg
+		err error
+	}
+
+	ch := make(chan response, 1)
+
+	go func() {
+		msg, err := c.sub.NextMsgWithContext(ctx)
+		if err != nil {
+			ch <- response{err: fmt.Errorf("nextMsgWithContext: %w", err)}
+		} else {
+			ch <- response{msg: msg}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp := <-ch:
+		if resp.err != nil {
+			return nil, resp.err
+		}
+		return resp.msg, nil
+	}
 }
