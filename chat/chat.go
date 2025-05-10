@@ -308,11 +308,16 @@ func (c *Chat) listenBUS() {
 		for {
 			msg, err := c.readMessageFromBUS(context.Background())
 			if err != nil {
+				//critical errors
 				if errors.Is(err, context.Canceled) {
+					c.log.Error("client canceled the context", "err", err)
+					return
+				} else if errors.Is(err, nats.ErrConnectionClosed) {
+					c.log.Error("nats connection is closed", "err", err)
 					return
 				}
-
-				c.log.Error("error while reading message", "err", err)
+				//non-critical
+				c.log.Error("listenBUS: error while reading message", "err", err)
 				continue
 			}
 
@@ -328,7 +333,7 @@ func (c *Chat) listenBUS() {
 			to, err := c.users.Retrieve(bm.ToID)
 			if err != nil {
 				//not found in this cap
-				c.log.Error("recipient is not found in this CAP", "status", "not found", "err", err)
+				c.log.Error("listenBUS: recipient is not found in this CAP", "status", "not found", "err", err)
 				continue
 			}
 
@@ -338,10 +343,10 @@ func (c *Chat) listenBUS() {
 			}
 
 			if err := c.sendMessage(from, to, bm.Text); err != nil {
-				c.log.Error("sending message failed", "err", err)
+				c.log.Error("listenBUS: sending message failed", "err", err)
 			}
 
-			c.log.Info("sent message", "from", bm.FromID, "to", to.ID)
+			c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
 		}
 	}()
 }
@@ -366,10 +371,13 @@ func (c *Chat) readMessageFromBUS(ctx context.Context) (*nats.Msg, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+		//no ack
 	case resp := <-ch:
 		if resp.err != nil {
 			return nil, resp.err
 		}
+		//ack the message
+		resp.msg.Ack()
 		return resp.msg, nil
 	}
 }
