@@ -26,6 +26,7 @@ type outMessage struct {
 }
 
 type busMessage struct {
+	CapID    string    `json:"capID"`
 	FromID   uuid.UUID `json:"fromID"`
 	FromName string    `json:"fromName"`
 	ToID     uuid.UUID `json:"toID"`

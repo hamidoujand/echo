@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/hamidoujand/echo/errs"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 var (
@@ -31,38 +32,52 @@ type users interface {
 }
 
 type Chat struct {
-	log     *slog.Logger
-	users   users
-	jsc     nats.JetStreamContext
-	sub     *nats.Subscription
-	subject string
+	capID    string
+	log      *slog.Logger
+	users    users
+	js       jetstream.JetStream
+	consumer jetstream.Consumer
+	stream   jetstream.Stream
+	subject  string
 }
 
-func New(log *slog.Logger, users users, conn *nats.Conn, subject string) (*Chat, error) {
-	jsc, err := conn.JetStream()
+func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID string) (*Chat, error) {
+	//create jetstream
+	js, err := jetstream.New(conn)
 	if err != nil {
 		return nil, fmt.Errorf("create jetStream: %w", err)
 	}
 
-	_, err = jsc.AddStream(&nats.StreamConfig{
+	ctx := context.Background()
+
+	//create a stream
+	stream, err := js.CreateStream(ctx, jetstream.StreamConfig{
 		Name:     subject,
 		Subjects: []string{subject},
+		MaxAge:   20 * time.Hour,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("adding stream: %w", err)
+		return nil, fmt.Errorf("creating stream: %w", err)
 	}
 
-	sub, err := jsc.SubscribeSync(subject)
+	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+		Durable:       capID,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverNewPolicy,
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("subscribe: %w", err)
+		return nil, fmt.Errorf("creating a jetstream consumer: %w", err)
 	}
 
 	c := Chat{
-		log:     log,
-		users:   users,
-		jsc:     jsc,
-		sub:     sub,
-		subject: subject,
+		capID:    capID,
+		log:      log,
+		users:    users,
+		js:       js,
+		consumer: consumer,
+		stream:   stream,
+		subject:  subject,
 	}
 
 	const maxWait = time.Second * 10
@@ -167,13 +182,14 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 			if errors.Is(err, ErrUserNotFound) {
 				//send to the BUS
 				m := busMessage{
+					CapID:    c.capID,
 					FromID:   usr.ID,
 					FromName: usr.Name,
 					ToID:     in.ToID,
 					Text:     in.Text,
 				}
 
-				c.sendMessageToBUS(m)
+				c.sendMessageToBUS(ctx, m)
 			} else {
 				c.log.Error("failed to retrieve the message's recipient", "err", err)
 			}
@@ -289,13 +305,13 @@ func (c *Chat) sendMessage(from User, to User, msg string) error {
 	return nil
 }
 
-func (c *Chat) sendMessageToBUS(msg busMessage) error {
+func (c *Chat) sendMessageToBUS(ctx context.Context, msg busMessage) error {
 	bs, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshalling msg: %w", err)
 	}
 
-	_, err = c.jsc.Publish(c.subject, bs)
+	_, err = c.js.Publish(ctx, c.subject, bs)
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
@@ -323,11 +339,14 @@ func (c *Chat) listenBUS() {
 
 			//create the inMessage
 			var bm busMessage
-			if err := json.Unmarshal(msg.Data, &bm); err != nil {
+			if err := json.Unmarshal(msg.Data(), &bm); err != nil {
 				c.log.Error("unmarshaling BUS message failed", "err", err)
 				continue
 			}
-
+			//skip our own messages
+			if bm.CapID == c.capID {
+				continue
+			}
 			c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
 
 			to, err := c.users.Retrieve(bm.ToID)
@@ -351,16 +370,16 @@ func (c *Chat) listenBUS() {
 	}()
 }
 
-func (c *Chat) readMessageFromBUS(ctx context.Context) (*nats.Msg, error) {
+func (c *Chat) readMessageFromBUS(ctx context.Context) (jetstream.Msg, error) {
 	type response struct {
-		msg *nats.Msg
+		msg jetstream.Msg
 		err error
 	}
 
 	ch := make(chan response, 1)
 
 	go func() {
-		msg, err := c.sub.NextMsgWithContext(ctx)
+		msg, err := c.consumer.Next()
 		if err != nil {
 			ch <- response{err: fmt.Errorf("nextMsgWithContext: %w", err)}
 		} else {
@@ -377,7 +396,9 @@ func (c *Chat) readMessageFromBUS(ctx context.Context) (*nats.Msg, error) {
 			return nil, resp.err
 		}
 		//ack the message
-		resp.msg.Ack()
+		if err := resp.msg.Ack(); err != nil {
+			return nil, fmt.Errorf("ack message: %w", err)
+		}
 		return resp.msg, nil
 	}
 }

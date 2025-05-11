@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/google/uuid"
 	"github.com/hamidoujand/echo/chat"
 	"github.com/hamidoujand/echo/handler"
 	"github.com/hamidoujand/echo/users"
@@ -52,6 +53,7 @@ func run(log *slog.Logger) error {
 			Host    string `conf:"default:demo.nats.io"`
 			Name    string `conf:"default:cap"`
 			Subject string `conf:"default:cap"`
+			CapID   string `conf:"default:infra/id.txt"`
 		}
 	}{}
 
@@ -75,6 +77,42 @@ func run(log *slog.Logger) error {
 	log.Info("service starting", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 	//------------------------------------------------------------------------------
 	//NATS
+	_, err = os.Stat(cfg.NATS.CapID)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("state for capID File: %s: %w", cfg.NATS.CapID, err)
+		}
+		//find not found , create one
+		f, err := os.Create(cfg.NATS.CapID)
+		if err != nil {
+			return fmt.Errorf("creating new capID file: %w", err)
+		}
+		capID := uuid.NewString()
+		if _, err := f.WriteString(capID); err != nil {
+			return fmt.Errorf("writing capID file: %w", err)
+		}
+		f.Close()
+	}
+
+	f, err := os.Open(cfg.NATS.CapID)
+	if err != nil {
+		return fmt.Errorf("open capID file: %s: %w", cfg.NATS.CapID, err)
+	}
+
+	bs, err := io.ReadAll(f)
+	if err != nil {
+		return fmt.Errorf("readAll capID file: %w", err)
+	}
+
+	capID, err := uuid.ParseBytes(bs)
+	if err != nil {
+		return fmt.Errorf("capID must be a uuid: %w", err)
+	}
+
+	f.Close()
+
+	log.Info("startup", "capID", capID)
+
 	nc, err := nats.Connect(cfg.NATS.Host)
 	if err != nil {
 		return fmt.Errorf("nats connect: %w", err)
@@ -82,10 +120,11 @@ func run(log *slog.Logger) error {
 	defer nc.Close()
 	users := users.New(log)
 
-	chat, err := chat.New(log, users, nc, cfg.NATS.Subject)
+	chat, err := chat.New(log, users, nc, cfg.NATS.Subject, capID.String())
 	if err != nil {
 		return fmt.Errorf("creating chat obj: %w", err)
 	}
+
 	//---------------------------------------------------------------------------
 	//Mux
 	mux := handler.Register(handler.Config{
