@@ -82,7 +82,7 @@ func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID s
 
 	const maxWait = time.Second * 10
 	c.ping(maxWait)
-	c.listenBUS()
+	consumer.Consume(c.ListenBUS, jetstream.PullMaxMessages(1))
 
 	return &c, nil
 }
@@ -319,98 +319,35 @@ func (c *Chat) sendMessageToBUS(ctx context.Context, msg busMessage) error {
 	return nil
 }
 
-func (c *Chat) listenBUS() {
-	go func() {
-		for {
-			msg, err := c.readMessageFromBUS(context.Background())
-			if err != nil {
-				//critical errors
-				if errors.Is(err, context.Canceled) {
-					c.log.Error("client canceled the context", "err", err)
-					return
-				} else if errors.Is(err, nats.ErrConnectionClosed) {
-					c.log.Error("nats connection is closed", "err", err)
-					return
-				}
-				//non-critical
-				c.log.Error("listenBUS: error while reading message", "err", err)
-				continue
-			}
+func (c *Chat) ListenBUS(msg jetstream.Msg) {
+	//create the inMessage
+	var bm busMessage
+	if err := json.Unmarshal(msg.Data(), &bm); err != nil {
+		c.log.Error("unmarshaling BUS message failed", "err", err)
+		return
+	}
+	//skip our own messages
+	if bm.CapID == c.capID {
+		return
+	}
+	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
 
-			//create the inMessage
-			var bm busMessage
-			if err := json.Unmarshal(msg.Data(), &bm); err != nil {
-				c.log.Error("unmarshaling BUS message failed", "err", err)
-				continue
-			}
-			//skip our own messages
-			if bm.CapID == c.capID {
-				continue
-			}
-			c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
-
-			to, err := c.users.Retrieve(bm.ToID)
-			if err != nil {
-				//not found in this cap
-				c.log.Error("listenBUS: recipient is not found in this CAP", "status", "not found", "err", err)
-				continue
-			}
-
-			from := User{
-				ID:   bm.FromID,
-				Name: bm.FromName,
-			}
-
-			if err := c.sendMessage(from, to, bm.Text); err != nil {
-				c.log.Error("listenBUS: sending message failed", "err", err)
-			}
-
-			c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
-		}
-	}()
-}
-
-func (c *Chat) readMessageFromBUS(ctx context.Context) (jetstream.Msg, error) {
-	type response struct {
-		msg jetstream.Msg
-		err error
+	to, err := c.users.Retrieve(bm.ToID)
+	if err != nil {
+		//not found in this cap
+		c.log.Error("listenBUS: recipient is not found in this CAP", "status", "not found", "err", err)
+		return
 	}
 
-	ch := make(chan response, 1)
-
-	go func() {
-		for {
-			msg, err := c.consumer.Next(jetstream.FetchMaxWait(time.Second * 5))
-			if err != nil {
-				if errors.Is(err, nats.ErrTimeout) {
-					continue
-				}
-				ch <- response{err: fmt.Errorf("next: %w", err)}
-				break
-			}
-
-			if err := ctx.Err(); err != nil {
-				ch <- response{err: err}
-				break
-			}
-
-			ch <- response{msg: msg}
-			break
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-		//no ack
-	case resp := <-ch:
-		if resp.err != nil {
-			return nil, resp.err
-		}
-		//ack the message
-		if err := resp.msg.Ack(); err != nil {
-			return nil, fmt.Errorf("ack message: %w", err)
-		}
-		return resp.msg, nil
+	from := User{
+		ID:   bm.FromID,
+		Name: bm.FromName,
 	}
+
+	if err := c.sendMessage(from, to, bm.Text); err != nil {
+		c.log.Error("listenBUS: sending message failed", "err", err)
+	}
+
+	c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
+
 }
