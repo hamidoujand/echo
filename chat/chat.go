@@ -379,11 +379,23 @@ func (c *Chat) readMessageFromBUS(ctx context.Context) (jetstream.Msg, error) {
 	ch := make(chan response, 1)
 
 	go func() {
-		msg, err := c.consumer.Next()
-		if err != nil {
-			ch <- response{err: fmt.Errorf("nextMsgWithContext: %w", err)}
-		} else {
+		for {
+			msg, err := c.consumer.Next(jetstream.FetchMaxWait(time.Second * 5))
+			if err != nil {
+				if errors.Is(err, nats.ErrTimeout) {
+					continue
+				}
+				ch <- response{err: fmt.Errorf("next: %w", err)}
+				break
+			}
+
+			if err := ctx.Err(); err != nil {
+				ch <- response{err: err}
+				break
+			}
+
 			ch <- response{msg: msg}
+			break
 		}
 	}()
 
