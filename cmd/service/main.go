@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -53,7 +54,7 @@ func run(log *slog.Logger) error {
 			Host    string `conf:"default:demo.nats.io"`
 			Name    string `conf:"default:cap"`
 			Subject string `conf:"default:cap"`
-			CapID   string `conf:"default:infra/id.txt"`
+			CapID   string `conf:"default:infra"`
 		}
 	}{}
 
@@ -77,13 +78,20 @@ func run(log *slog.Logger) error {
 	log.Info("service starting", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 	//------------------------------------------------------------------------------
 	//NATS
-	_, err = os.Stat(cfg.NATS.CapID)
+	if !strings.HasSuffix(cfg.NATS.CapID, "/") {
+		cfg.NATS.CapID += "/"
+	}
+
+	capIDFilename := cfg.NATS.CapID + "id.txt"
+
+	_, err = os.Stat(capIDFilename)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("state for capID File: %s: %w", cfg.NATS.CapID, err)
+		if err := os.MkdirAll(cfg.NATS.CapID, 0755); err != nil {
+			return fmt.Errorf("mkdirAll: %w", err)
 		}
+
 		//find not found , create one
-		f, err := os.Create(cfg.NATS.CapID)
+		f, err := os.Create(capIDFilename)
 		if err != nil {
 			return fmt.Errorf("creating new capID file: %w", err)
 		}
