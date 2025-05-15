@@ -102,7 +102,7 @@ func run(log *slog.Logger) error {
 		f.Close()
 	}
 
-	f, err := os.Open(cfg.NATS.CapID)
+	f, err := os.Open(capIDFilename)
 	if err != nil {
 		return fmt.Errorf("open capID file: %s: %w", cfg.NATS.CapID, err)
 	}
@@ -126,6 +126,7 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("nats connect: %w", err)
 	}
 	defer nc.Close()
+
 	users := users.New(log)
 
 	chat, err := chat.New(log, users, nc, cfg.NATS.Subject, capID.String())

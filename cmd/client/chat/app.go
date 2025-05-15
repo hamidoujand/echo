@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/google/uuid"
 	"github.com/rivo/tview"
 )
 
@@ -11,11 +12,13 @@ type App struct {
 	app      *tview.Application
 	flex     *tview.Flex
 	textView *tview.TextView
+	button   *tview.Button
+	list     *tview.List
+	textArea *tview.TextArea
+	client   *Client
 }
 
-type ButtonHandler func(textView *tview.TextView)
-
-func NewApp(bthHandler ButtonHandler) *App {
+func NewApp(client *Client) *App {
 
 	app := tview.NewApplication()
 
@@ -24,8 +27,8 @@ func NewApp(bthHandler ButtonHandler) *App {
 	list := tview.NewList()
 	list.SetBorder(true)
 	list.SetTitle("Users")
-	list.AddItem("John Doe", "", '1', nil)
-	list.AddItem("Jane Doe", "", '2', nil)
+	list.AddItem("John Doe", "8ce5af7a-788c-4c83-8e70-4500b775b359", '1', nil)
+	list.AddItem("Jane Doe", "8a45ec7a-273c-430a-9d90-ac30f94000cd", '2', nil)
 
 	// -------------------------------------------------------------------------
 
@@ -47,9 +50,7 @@ func NewApp(bthHandler ButtonHandler) *App {
 	button.SetBorder(true)
 	button.SetBorderPadding(0, 1, 0, 0)
 	button.SetBorderColor(tcell.ColorGreen)
-	button.SetSelectedFunc(func() {
-		bthHandler(textView)
-	})
+
 	// -------------------------------------------------------------------------
 
 	textArea := tview.NewTextArea()
@@ -81,22 +82,60 @@ func NewApp(bthHandler ButtonHandler) *App {
 		return event
 	})
 
-	return &App{
+	a := &App{
 		app:      app,
 		flex:     flex,
 		textView: textView,
+		button:   button,
+		textArea: textArea,
+		client:   client,
+		list:     list,
 	}
+
+	button.SetSelectedFunc(a.buttonHandler)
+
+	return a
 }
 
-func (v *App) Run() error {
-	return v.app.SetRoot(v.flex, true).EnableMouse(true).Run()
+func (a *App) Run() error {
+	return a.app.SetRoot(a.flex, true).EnableMouse(true).Run()
 }
 
-func (v *App) WriteMessage(msg string) {
-	v.textView.ScrollToEnd()
-	fmt.Fprintln(v.textView, msg)
+func (a *App) FindName(id string) string {
+	for i := range a.list.GetItemCount() {
+		name, toId := a.list.GetItemText(i)
+		if toId == id {
+			return name
+		}
+	}
+	return ""
 }
 
-func (v *App) ClearMessage() {
-	v.textView.Clear()
+func (a *App) WriteMessage(name string, msg string) {
+	a.textView.ScrollToEnd()
+	fmt.Fprintln(a.textView, "--------------------------------------")
+	fmt.Fprintln(a.textView, name+": "+msg)
+}
+
+func (a *App) buttonHandler() {
+	_, receiverID := a.list.GetItemText(a.list.GetCurrentItem())
+
+	uid, err := uuid.Parse(receiverID)
+	if err != nil {
+		a.WriteMessage("system", fmt.Sprintf("error parsing TO id: %s", err))
+		return
+	}
+
+	msg := a.textArea.GetText()
+	if msg == "" {
+		return
+	}
+
+	if err := a.client.Send(uid, msg); err != nil {
+		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
+		return
+	}
+
+	a.textArea.SetText("", false)
+	a.WriteMessage("You", msg)
 }

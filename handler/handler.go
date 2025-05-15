@@ -24,6 +24,7 @@ func Register(cfg Config) *web.App {
 		mid.Error(cfg.Logger),
 		mid.Panics(),
 	)
+
 	const version = "v1"
 
 	h := Handler{

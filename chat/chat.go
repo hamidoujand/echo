@@ -42,13 +42,13 @@ type Chat struct {
 }
 
 func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID string) (*Chat, error) {
+	ctx := context.Background()
+
 	//create jetstream
 	js, err := jetstream.New(conn)
 	if err != nil {
 		return nil, fmt.Errorf("create jetStream: %w", err)
 	}
-
-	ctx := context.Background()
 
 	//create a stream
 	stream, err := js.CreateStream(ctx, jetstream.StreamConfig{
@@ -205,6 +205,43 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 	}
 }
 
+func (c *Chat) ListenBUS(msg jetstream.Msg) {
+	//create the inMessage
+	var bm busMessage
+	if err := json.Unmarshal(msg.Data(), &bm); err != nil {
+		c.log.Error("unmarshaling BUS message failed", "err", err)
+		return
+	}
+	//skip our own messages
+	if bm.CapID == c.capID {
+		return
+	}
+	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
+
+	to, err := c.users.Retrieve(bm.ToID)
+	if err != nil {
+		//not found in this cap
+		c.log.Error("listenBUS: recipient is not found in this CAP", "status", "not found", "err", err)
+		return
+	}
+
+	from := User{
+		ID:   bm.FromID,
+		Name: bm.FromName,
+	}
+
+	if err := c.sendMessage(from, to, bm.Text); err != nil {
+		c.log.Error("listenBUS: sending message failed", "err", err)
+	}
+
+	if err := msg.Ack(); err != nil {
+		c.log.Error("failed to ack the message", "err", err)
+	}
+
+	c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
+
+}
+
 func (c *Chat) pong(usrID uuid.UUID) func(appData string) error {
 	h := func(appData string) error {
 		usr, err := c.users.UpdateLastPong(usrID)
@@ -317,37 +354,4 @@ func (c *Chat) sendMessageToBUS(ctx context.Context, msg busMessage) error {
 	}
 
 	return nil
-}
-
-func (c *Chat) ListenBUS(msg jetstream.Msg) {
-	//create the inMessage
-	var bm busMessage
-	if err := json.Unmarshal(msg.Data(), &bm); err != nil {
-		c.log.Error("unmarshaling BUS message failed", "err", err)
-		return
-	}
-	//skip our own messages
-	if bm.CapID == c.capID {
-		return
-	}
-	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
-
-	to, err := c.users.Retrieve(bm.ToID)
-	if err != nil {
-		//not found in this cap
-		c.log.Error("listenBUS: recipient is not found in this CAP", "status", "not found", "err", err)
-		return
-	}
-
-	from := User{
-		ID:   bm.FromID,
-		Name: bm.FromName,
-	}
-
-	if err := c.sendMessage(from, to, bm.Text); err != nil {
-		c.log.Error("listenBUS: sending message failed", "err", err)
-	}
-
-	c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
-
 }
