@@ -4,46 +4,45 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/google/uuid"
-	"github.com/hamidoujand/echo/cmd/client/chat"
+	"github.com/hamidoujand/echo/cmd/client/app"
 )
 
-const url = "ws://localhost:8000/v1/connect"
+const (
+	url       = "ws://localhost:8000/v1/connect"
+	configDir = "infra"
+)
 
 func main() {
-	users := []uuid.UUID{
-		uuid.MustParse("8ce5af7a-788c-4c83-8e70-4500b775b359"),
-		uuid.MustParse("8a45ec7a-273c-430a-9d90-ac30f94000cd"),
+	if err := run(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	conf, err := app.NewConfig(configDir)
+	if err != nil {
+		return fmt.Errorf("newConfig: %w", err)
 	}
 
-	var ID uuid.UUID
-
-	switch os.Args[1] {
-	case "0":
-		ID = users[0]
-	case "1":
-		ID = users[1]
-	}
-
-	client := chat.NewClient(ID, url)
+	usr := conf.User()
+	client := app.NewClient(usr.ID, url, conf)
 	defer client.Close()
 
-	app := chat.NewApp(client)
-	name := app.FindName(ID.String())
-	writeText := func(name, msg string) {
+	app := app.New(client, conf)
+
+	uiWriter := func(name, msg string) {
 		app.WriteMessage(name, msg)
 	}
 
-	if err := client.Handshake(name, writeText); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	if err := client.Handshake(usr.Name, uiWriter); err != nil {
+		return fmt.Errorf("client handshake failed: %w", err)
 	}
 
 	app.WriteMessage("system", "Successfully connected!")
 
 	if err := app.Run(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return fmt.Errorf("application run failed: %w", err)
 	}
-
+	return nil
 }

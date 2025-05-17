@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -78,11 +77,7 @@ func run(log *slog.Logger) error {
 	log.Info("service starting", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 	//------------------------------------------------------------------------------
 	//NATS
-	if !strings.HasSuffix(cfg.NATS.CapID, "/") {
-		cfg.NATS.CapID += "/"
-	}
-
-	capIDFilename := cfg.NATS.CapID + "id.txt"
+	capIDFilename := filepath.Join(cfg.NATS.CapID, "id.txt")
 
 	_, err = os.Stat(capIDFilename)
 	if err != nil {
@@ -129,7 +124,7 @@ func run(log *slog.Logger) error {
 
 	users := users.New(log)
 
-	chat, err := chat.New(log, users, nc, cfg.NATS.Subject, capID.String())
+	chat, err := chat.New(log, users, nc, cfg.NATS.Subject, capID)
 	if err != nil {
 		return fmt.Errorf("creating chat obj: %w", err)
 	}

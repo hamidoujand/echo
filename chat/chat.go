@@ -24,15 +24,15 @@ var (
 
 type users interface {
 	Add(usr User) error
-	Remove(userID uuid.UUID)
-	Retrieve(userID uuid.UUID) (User, error)
-	Connections() map[uuid.UUID]Connection
-	UpdateLastPong(usrID uuid.UUID) (User, error)
-	UpdateLastPing(usrID uuid.UUID) error
+	Remove(userID string)
+	Retrieve(userID string) (User, error)
+	Connections() map[string]Connection
+	UpdateLastPong(usrID string) (User, error)
+	UpdateLastPing(usrID string) error
 }
 
 type Chat struct {
-	capID    string
+	capID    uuid.UUID
 	log      *slog.Logger
 	users    users
 	js       jetstream.JetStream
@@ -41,7 +41,7 @@ type Chat struct {
 	subject  string
 }
 
-func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID string) (*Chat, error) {
+func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID uuid.UUID) (*Chat, error) {
 	ctx := context.Background()
 
 	//create jetstream
@@ -61,7 +61,7 @@ func New(log *slog.Logger, users users, conn *nats.Conn, subject string, capID s
 	}
 
 	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Durable:       capID,
+		Durable:       capID.String(),
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverNewPolicy,
 	})
@@ -242,7 +242,7 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 
 }
 
-func (c *Chat) pong(usrID uuid.UUID) func(appData string) error {
+func (c *Chat) pong(usrID string) func(appData string) error {
 	h := func(appData string) error {
 		usr, err := c.users.UpdateLastPong(usrID)
 		if err != nil {

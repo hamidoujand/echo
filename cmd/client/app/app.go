@@ -1,10 +1,9 @@
-package chat
+package app
 
 import (
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/google/uuid"
 	"github.com/rivo/tview"
 )
 
@@ -16,9 +15,10 @@ type App struct {
 	list     *tview.List
 	textArea *tview.TextArea
 	client   *Client
+	cfg      *Config
 }
 
-func NewApp(client *Client) *App {
+func New(client *Client, cfg *Config) *App {
 
 	app := tview.NewApplication()
 
@@ -27,8 +27,11 @@ func NewApp(client *Client) *App {
 	list := tview.NewList()
 	list.SetBorder(true)
 	list.SetTitle("Users")
-	list.AddItem("John Doe", "8ce5af7a-788c-4c83-8e70-4500b775b359", '1', nil)
-	list.AddItem("Jane Doe", "8a45ec7a-273c-430a-9d90-ac30f94000cd", '2', nil)
+	contacts := cfg.Contacts()
+	for i, c := range contacts {
+		id := rune(i + 49)
+		list.AddItem(c.Name, c.ID, id, nil)
+	}
 
 	// -------------------------------------------------------------------------
 
@@ -40,7 +43,7 @@ func NewApp(client *Client) *App {
 		})
 
 	textView.SetBorder(true)
-	textView.SetTitle("chat")
+	textView.SetTitle(fmt.Sprintf("*** %s ***", cfg.User().ID))
 
 	// -------------------------------------------------------------------------
 
@@ -90,6 +93,7 @@ func NewApp(client *Client) *App {
 		textArea: textArea,
 		client:   client,
 		list:     list,
+		cfg:      cfg,
 	}
 
 	button.SetSelectedFunc(a.buttonHandler)
@@ -120,18 +124,12 @@ func (a *App) WriteMessage(name string, msg string) {
 func (a *App) buttonHandler() {
 	_, receiverID := a.list.GetItemText(a.list.GetCurrentItem())
 
-	uid, err := uuid.Parse(receiverID)
-	if err != nil {
-		a.WriteMessage("system", fmt.Sprintf("error parsing TO id: %s", err))
-		return
-	}
-
 	msg := a.textArea.GetText()
 	if msg == "" {
 		return
 	}
 
-	if err := a.client.Send(uid, msg); err != nil {
+	if err := a.client.Send(receiverID, msg); err != nil {
 		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
 		return
 	}

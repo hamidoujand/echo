@@ -5,19 +5,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/hamidoujand/echo/chat"
 )
 
 type Users struct {
 	log       *slog.Logger
-	users     map[uuid.UUID]chat.User
+	users     map[string]chat.User
 	usersLock sync.RWMutex
 }
 
 func New(log *slog.Logger) *Users {
 	return &Users{
-		users: make(map[uuid.UUID]chat.User),
+		users: make(map[string]chat.User),
 		log:   log,
 	}
 }
@@ -35,7 +34,7 @@ func (u *Users) Add(usr chat.User) error {
 	return nil
 }
 
-func (u *Users) Retrieve(userID uuid.UUID) (chat.User, error) {
+func (u *Users) Retrieve(userID string) (chat.User, error) {
 	u.usersLock.RLock()
 	defer u.usersLock.RUnlock()
 	usr, ok := u.users[userID]
@@ -46,11 +45,11 @@ func (u *Users) Retrieve(userID uuid.UUID) (chat.User, error) {
 	return usr, nil
 }
 
-func (u *Users) Connections() map[uuid.UUID]chat.Connection {
+func (u *Users) Connections() map[string]chat.Connection {
 	u.usersLock.RLock()
 	defer u.usersLock.RUnlock()
 
-	result := make(map[uuid.UUID]chat.Connection)
+	result := make(map[string]chat.Connection)
 	for id, usr := range u.users {
 		c := chat.Connection{
 			Conn:     usr.Conn,
@@ -64,7 +63,7 @@ func (u *Users) Connections() map[uuid.UUID]chat.Connection {
 	return result
 }
 
-func (u *Users) Remove(userID uuid.UUID) {
+func (u *Users) Remove(userID string) {
 	u.usersLock.Lock()
 	defer u.usersLock.Unlock()
 
@@ -78,7 +77,7 @@ func (u *Users) Remove(userID uuid.UUID) {
 	u.log.Info("removing user", "id", usr.ID, "name", usr.Name)
 }
 
-func (u *Users) UpdateLastPong(usrID uuid.UUID) (chat.User, error) {
+func (u *Users) UpdateLastPong(usrID string) (chat.User, error) {
 	u.usersLock.Lock()
 	defer u.usersLock.Unlock()
 
@@ -91,7 +90,7 @@ func (u *Users) UpdateLastPong(usrID uuid.UUID) (chat.User, error) {
 	return usr, nil
 }
 
-func (u *Users) UpdateLastPing(usrID uuid.UUID) error {
+func (u *Users) UpdateLastPing(usrID string) error {
 	u.usersLock.Lock()
 	defer u.usersLock.Unlock()
 

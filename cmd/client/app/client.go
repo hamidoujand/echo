@@ -1,18 +1,17 @@
-package chat
+package app
 
 import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
-type WriteText func(name, msg string)
+type UIWriter func(name, msg string)
 
 type user struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type outMessage struct {
@@ -21,20 +20,22 @@ type outMessage struct {
 }
 
 type inMessage struct {
-	ToID uuid.UUID `json:"toID"`
-	Text string    `json:"text"`
+	ToID string `json:"toID"`
+	Text string `json:"text"`
 }
 
 type Client struct {
-	id   uuid.UUID
+	id   string
 	conn *websocket.Conn
 	url  string
+	cfg  *Config
 }
 
-func NewClient(id uuid.UUID, url string) *Client {
+func NewClient(id string, url string, cfg *Config) *Client {
 	return &Client{
 		id:  id,
 		url: url,
+		cfg: cfg,
 	}
 }
 
@@ -45,7 +46,7 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) Handshake(name string, writeText WriteText) error {
+func (c *Client) Handshake(name string, writer UIWriter) error {
 	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
@@ -63,7 +64,7 @@ func (c *Client) Handshake(name string, writeText WriteText) error {
 	}
 
 	user := struct {
-		ID   uuid.UUID
+		ID   string
 		Name string
 	}{
 		ID:   c.id,
@@ -83,7 +84,7 @@ func (c *Client) Handshake(name string, writeText WriteText) error {
 	if err != nil {
 		return fmt.Errorf("readMessage: %w", err)
 	}
-	writeText("system", string(msg))
+	writer("system", string(msg))
 
 	//=========================================================================
 	// listener goroutine
@@ -91,23 +92,28 @@ func (c *Client) Handshake(name string, writeText WriteText) error {
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
-				writeText("system", fmt.Sprintf("read message failed: %s", err))
+				writer("system", fmt.Sprintf("read message failed: %s", err))
 				return
 			}
 
 			var out outMessage
 			if err := json.Unmarshal(msg, &out); err != nil {
-				writeText("system", fmt.Sprintf("unmarshaling message failed: %s", err))
+				writer("system", fmt.Sprintf("unmarshaling message failed: %s", err))
 				return
 			}
-			writeText(out.From.Name, out.Text)
+			//find the username
+			usr, err := c.cfg.LookupContact(out.From.ID)
+			if err == nil {
+				out.From.Name = usr.Name
+			}
+			writer(out.From.Name, out.Text)
 		}
 	}()
 
 	return nil
 }
 
-func (c *Client) Send(to uuid.UUID, msg string) error {
+func (c *Client) Send(to string, msg string) error {
 	if c.conn == nil {
 		return fmt.Errorf("no connection")
 	}

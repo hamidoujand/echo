@@ -8,7 +8,7 @@ import (
 )
 
 type User struct {
-	ID       uuid.UUID       `json:"id"`
+	ID       string          `json:"id"`
 	Name     string          `json:"name"`
 	LastPing time.Time       `json:"lastPing"`
 	LastPong time.Time       `json:"lastPong"`
@@ -16,8 +16,8 @@ type User struct {
 }
 
 type inMessage struct {
-	ToID uuid.UUID `json:"toID"`
-	Text string    `json:"text"`
+	ToID string `json:"toID"`
+	Text string `json:"text"`
 }
 
 type outMessage struct {
@@ -26,10 +26,10 @@ type outMessage struct {
 }
 
 type busMessage struct {
-	CapID    string    `json:"capID"`
-	FromID   uuid.UUID `json:"fromID"`
+	CapID    uuid.UUID `json:"capID"`
+	FromID   string    `json:"fromID"`
 	FromName string    `json:"fromName"`
-	ToID     uuid.UUID `json:"toID"`
+	ToID     string    `json:"toID"`
 	Text     string    `json:"text"`
 }
 
