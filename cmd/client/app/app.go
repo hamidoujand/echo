@@ -29,8 +29,8 @@ func New(client *Client, cfg *Config) *App {
 	list.SetTitle("Users")
 	contacts := cfg.Contacts()
 	for i, c := range contacts {
-		id := rune(i + 49)
-		list.AddItem(c.Name, c.ID, id, nil)
+		shortcut := rune(i + 49)
+		list.AddItem(c.Name, c.ID, shortcut, nil)
 	}
 
 	// -------------------------------------------------------------------------
@@ -136,4 +136,9 @@ func (a *App) buttonHandler() {
 
 	a.textArea.SetText("", false)
 	a.WriteMessage("You", msg)
+}
+
+func (a *App) UpdateContact(id string, name string) {
+	shortcut := rune(a.list.GetItemCount() + 49)
+	a.list.AddItem(name, id, shortcut, nil)
 }

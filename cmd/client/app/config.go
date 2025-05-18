@@ -33,6 +33,7 @@ type Users struct {
 
 type Config struct {
 	user     User
+	dir      string
 	contacts []User
 	mu       sync.RWMutex
 }
@@ -60,6 +61,7 @@ func NewConfig(confDir string) (*Config, error) {
 				ID:   id,
 				Name: "Anonymous",
 			},
+			Contacts: make([]userDocument, 0),
 		}
 
 		if err := json.NewEncoder(f).Encode(doc); err != nil {
@@ -71,6 +73,7 @@ func NewConfig(confDir string) (*Config, error) {
 				ID:   doc.User.ID,
 				Name: doc.User.Name,
 			},
+			dir: confDir,
 		}
 
 		return &cfg, nil
@@ -125,6 +128,29 @@ func (c *Config) Contacts() []User {
 	return c.contacts
 }
 
-func (c *Config) AddContact(user User) error {
+func (c *Config) AddContact(id string, name string) error {
+	fullPath := filepath.Join(c.dir, configFilename)
+	// Read the entire file first
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", fullPath, err)
+	}
+
+	var doc document
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("decode into doc: %w", err)
+	}
+
+	doc.Contacts = append(doc.Contacts, userDocument{ID: id, Name: name})
+
+	newData, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("encode updates: %w", err)
+	}
+
+	if err := os.WriteFile(fullPath, newData, 0644); err != nil {
+		return fmt.Errorf("write file %s: %w", fullPath, err)
+	}
+
 	return nil
 }

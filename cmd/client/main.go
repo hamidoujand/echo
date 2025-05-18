@@ -29,19 +29,23 @@ func run() error {
 	client := app.NewClient(usr.ID, url, conf)
 	defer client.Close()
 
-	app := app.New(client, conf)
+	a := app.New(client, conf)
 
 	uiWriter := func(name, msg string) {
-		app.WriteMessage(name, msg)
+		a.WriteMessage(name, msg)
 	}
 
-	if err := client.Handshake(usr.Name, uiWriter); err != nil {
+	updateContacts := func(id, name string) {
+		a.UpdateContact(id, name)
+	}
+
+	if err := client.Handshake(usr.Name, uiWriter, updateContacts); err != nil {
 		return fmt.Errorf("client handshake failed: %w", err)
 	}
 
-	app.WriteMessage("system", "Successfully connected!")
+	a.WriteMessage("system", "Successfully connected!")
 
-	if err := app.Run(); err != nil {
+	if err := a.Run(); err != nil {
 		return fmt.Errorf("application run failed: %w", err)
 	}
 	return nil

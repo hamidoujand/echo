@@ -8,6 +8,7 @@ import (
 )
 
 type UIWriter func(name, msg string)
+type UpdateContact func(id, name string)
 
 type user struct {
 	ID   string `json:"id"`
@@ -46,7 +47,7 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) Handshake(name string, writer UIWriter) error {
+func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateContact) error {
 	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
@@ -84,7 +85,7 @@ func (c *Client) Handshake(name string, writer UIWriter) error {
 	if err != nil {
 		return fmt.Errorf("readMessage: %w", err)
 	}
-	writer("system", string(msg))
+	uiWriter("system", string(msg))
 
 	//=========================================================================
 	// listener goroutine
@@ -92,21 +93,29 @@ func (c *Client) Handshake(name string, writer UIWriter) error {
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
-				writer("system", fmt.Sprintf("read message failed: %s", err))
+				uiWriter("system", fmt.Sprintf("read message failed: %s", err))
 				return
 			}
 
 			var out outMessage
 			if err := json.Unmarshal(msg, &out); err != nil {
-				writer("system", fmt.Sprintf("unmarshaling message failed: %s", err))
+				uiWriter("system", fmt.Sprintf("unmarshaling message failed: %s", err))
 				return
 			}
 			//find the username
 			usr, err := c.cfg.LookupContact(out.From.ID)
-			if err == nil {
+			switch {
+			case err != nil:
+				if err := c.cfg.AddContact(out.From.ID, out.From.Name); err != nil {
+					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
+					return
+				}
+				updateContact(out.From.ID, out.From.Name)
+			default:
 				out.From.Name = usr.Name
 			}
-			writer(out.From.Name, out.Text)
+
+			uiWriter(out.From.Name, out.Text)
 		}
 	}()
 
