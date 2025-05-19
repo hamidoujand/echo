@@ -22,8 +22,9 @@ type document struct {
 }
 
 type User struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	Messages []string
 }
 
 type Users struct {
@@ -31,14 +32,14 @@ type Users struct {
 	Contacts []User
 }
 
-type Config struct {
-	user     User
+type Contacts struct {
+	me       User
 	dir      string
 	contacts []User
 	mu       sync.RWMutex
 }
 
-func NewConfig(confDir string) (*Config, error) {
+func NewContacts(confDir string) (*Contacts, error) {
 
 	fullPath := filepath.Join(confDir, configFilename)
 
@@ -68,8 +69,8 @@ func NewConfig(confDir string) (*Config, error) {
 			return nil, fmt.Errorf("encoding cfg to file: %w", err)
 		}
 
-		cfg := Config{
-			user: User{
+		cfg := Contacts{
+			me: User{
 				ID:   doc.User.ID,
 				Name: doc.User.Name,
 			},
@@ -92,11 +93,14 @@ func NewConfig(confDir string) (*Config, error) {
 
 	contacts := make([]User, len(doc.Contacts))
 	for i, c := range doc.Contacts {
-		contacts[i] = User(c)
+		contacts[i] = User{
+			ID:   c.ID,
+			Name: c.Name,
+		}
 	}
 
-	c := Config{
-		user: User{
+	c := Contacts{
+		me: User{
 			ID:   doc.User.ID,
 			Name: doc.User.Name,
 		},
@@ -105,13 +109,13 @@ func NewConfig(confDir string) (*Config, error) {
 	return &c, nil
 }
 
-func (c *Config) User() User {
+func (c *Contacts) My() User {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.user
+	return c.me
 }
 
-func (c *Config) LookupContact(id string) (User, error) {
+func (c *Contacts) LookupContact(id string) (User, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, usr := range c.contacts {
@@ -122,13 +126,30 @@ func (c *Config) LookupContact(id string) (User, error) {
 	return User{}, fmt.Errorf("user not found in contacts")
 }
 
-func (c *Config) Contacts() []User {
+func (c *Contacts) Contacts() []User {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.contacts
 }
 
-func (c *Config) AddContact(id string, name string) error {
+func (c *Contacts) AddMessage(id string, msg string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, usr := range c.contacts {
+		if usr.ID == id {
+			usr.Messages = append(usr.Messages, msg)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("user with id %s, not found", id)
+}
+
+func (c *Contacts) AddContact(id string, name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	fullPath := filepath.Join(c.dir, configFilename)
 	// Read the entire file first
 	data, err := os.ReadFile(fullPath)
@@ -142,6 +163,7 @@ func (c *Config) AddContact(id string, name string) error {
 	}
 
 	doc.Contacts = append(doc.Contacts, userDocument{ID: id, Name: name})
+	c.contacts = append(c.contacts, User{ID: id, Name: name})
 
 	newData, err := json.Marshal(doc)
 	if err != nil {

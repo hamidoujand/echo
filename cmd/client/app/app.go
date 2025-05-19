@@ -15,26 +15,14 @@ type App struct {
 	list     *tview.List
 	textArea *tview.TextArea
 	client   *Client
-	cfg      *Config
+	contacts *Contacts
 }
 
-func New(client *Client, cfg *Config) *App {
+func New(client *Client, contacts *Contacts) *App {
 
 	app := tview.NewApplication()
 
 	// -------------------------------------------------------------------------
-
-	list := tview.NewList()
-	list.SetBorder(true)
-	list.SetTitle("Users")
-	contacts := cfg.Contacts()
-	for i, c := range contacts {
-		shortcut := rune(i + 49)
-		list.AddItem(c.Name, c.ID, shortcut, nil)
-	}
-
-	// -------------------------------------------------------------------------
-
 	textView := tview.NewTextView().
 		SetTextAlign(tview.AlignLeft).
 		SetWordWrap(true).
@@ -43,7 +31,36 @@ func New(client *Client, cfg *Config) *App {
 		})
 
 	textView.SetBorder(true)
-	textView.SetTitle(fmt.Sprintf("*** %s ***", cfg.User().ID))
+	textView.SetTitle(fmt.Sprintf("*** %s ***", contacts.My().ID))
+	// -------------------------------------------------------------------------
+
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle("Users")
+	list.SetChangedFunc(func(index int, name, id string, shortcut rune) {
+		textView.Clear()
+		usr, err := contacts.LookupContact(id)
+		if err != nil {
+			textView.ScrollToEnd()
+			fmt.Fprintln(textView, "--------------------------------------")
+			fmt.Fprintln(textView, "system: "+err.Error())
+			return
+		}
+		for i, msg := range usr.Messages {
+			fmt.Fprintln(textView, msg)
+			if i < len(usr.Messages)-1 {
+				fmt.Fprintln(textView, "--------------------------------------")
+			}
+		}
+
+		list.SetItemText(index, usr.Name, usr.ID)
+	})
+
+	users := contacts.Contacts()
+	for i, c := range users {
+		shortcut := rune(i + 49)
+		list.AddItem(c.Name, c.ID, shortcut, nil)
+	}
 
 	// -------------------------------------------------------------------------
 
@@ -93,7 +110,7 @@ func New(client *Client, cfg *Config) *App {
 		textArea: textArea,
 		client:   client,
 		list:     list,
-		cfg:      cfg,
+		contacts: contacts,
 	}
 
 	button.SetSelectedFunc(a.buttonHandler)
@@ -105,20 +122,39 @@ func (a *App) Run() error {
 	return a.app.SetRoot(a.flex, true).EnableMouse(true).Run()
 }
 
-func (a *App) FindName(id string) string {
-	for i := range a.list.GetItemCount() {
-		name, toId := a.list.GetItemText(i)
-		if toId == id {
-			return name
-		}
-	}
-	return ""
-}
-
-func (a *App) WriteMessage(name string, msg string) {
+func (a *App) WriteMessage(id string, msg string) {
 	a.textView.ScrollToEnd()
-	fmt.Fprintln(a.textView, "--------------------------------------")
-	fmt.Fprintln(a.textView, name+": "+msg)
+
+	switch id {
+	case "system":
+		fmt.Fprintln(a.textView, "--------------------------------------")
+		fmt.Fprintln(a.textView, msg)
+	default:
+		idx := a.list.GetCurrentItem()
+		_, currentID := a.list.GetItemText(idx)
+		if currentID == "" {
+			fmt.Fprintln(a.textView, "--------------------------------------")
+			fmt.Fprintln(a.textView, "id not found: "+id)
+			return
+		}
+
+		if id == currentID {
+			fmt.Fprintln(a.textView, "--------------------------------------")
+			fmt.Fprintln(a.textView, msg)
+			return
+		}
+
+		for i := range a.list.GetItemCount() {
+			name, idStr := a.list.GetItemText(i)
+			if idStr == id {
+				a.list.SetItemText(i, "* "+name, idStr)
+				a.app.Draw()
+				return
+			}
+		}
+
+	}
+
 }
 
 func (a *App) buttonHandler() {
@@ -135,7 +171,6 @@ func (a *App) buttonHandler() {
 	}
 
 	a.textArea.SetText("", false)
-	a.WriteMessage("You", msg)
 }
 
 func (a *App) UpdateContact(id string, name string) {

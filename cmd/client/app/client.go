@@ -7,7 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type UIWriter func(name, msg string)
+type UIWriter func(id, msg string)
 type UpdateContact func(id, name string)
 
 type user struct {
@@ -26,17 +26,18 @@ type inMessage struct {
 }
 
 type Client struct {
-	id   string
-	conn *websocket.Conn
-	url  string
-	cfg  *Config
+	id       string
+	conn     *websocket.Conn
+	url      string
+	contacts *Contacts
+	uiWriter UIWriter
 }
 
-func NewClient(id string, url string, cfg *Config) *Client {
+func NewClient(id string, url string, contacts *Contacts) *Client {
 	return &Client{
-		id:  id,
-		url: url,
-		cfg: cfg,
+		id:       id,
+		url:      url,
+		contacts: contacts,
 	}
 }
 
@@ -54,6 +55,7 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 	}
 
 	c.conn = conn
+	c.uiWriter = uiWriter
 
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
@@ -103,10 +105,10 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				return
 			}
 			//find the username
-			usr, err := c.cfg.LookupContact(out.From.ID)
+			usr, err := c.contacts.LookupContact(out.From.ID)
 			switch {
 			case err != nil:
-				if err := c.cfg.AddContact(out.From.ID, out.From.Name); err != nil {
+				if err := c.contacts.AddContact(out.From.ID, out.From.Name); err != nil {
 					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
 					return
 				}
@@ -115,7 +117,14 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				out.From.Name = usr.Name
 			}
 
-			uiWriter(out.From.Name, out.Text)
+			formattedMsg := formatMessage(usr.Name, out.Text)
+
+			if err := c.contacts.AddMessage(out.From.ID, formattedMsg); err != nil {
+				uiWriter("system", fmt.Sprintf("failed to add message: %s", err))
+				return
+			}
+
+			uiWriter(out.From.ID, formattedMsg)
 		}
 	}()
 
@@ -140,5 +149,13 @@ func (c *Client) Send(to string, msg string) error {
 	if err := c.conn.WriteMessage(websocket.TextMessage, bs); err != nil {
 		return fmt.Errorf("writing message to the conn: %w", err)
 	}
+
+	msg = formatMessage("You", msg)
+	if err := c.contacts.AddMessage(to, msg); err != nil {
+		return fmt.Errorf("addMessage: %w", err)
+	}
+
+	c.uiWriter(to, msg)
+
 	return nil
 }

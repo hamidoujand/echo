@@ -20,26 +20,26 @@ func main() {
 }
 
 func run() error {
-	conf, err := app.NewConfig(configDir)
+	contacts, err := app.NewContacts(configDir)
 	if err != nil {
-		return fmt.Errorf("newConfig: %w", err)
+		return fmt.Errorf("newContacts: %w", err)
 	}
 
-	usr := conf.User()
-	client := app.NewClient(usr.ID, url, conf)
+	usr := contacts.My()
+	client := app.NewClient(usr.ID, url, contacts)
 	defer client.Close()
 
-	a := app.New(client, conf)
+	a := app.New(client, contacts)
 
-	uiWriter := func(name, msg string) {
-		a.WriteMessage(name, msg)
-	}
+	// uiWriter := func(id, msg string) {
+	// 	a.WriteMessage(id, msg)
+	// }
 
-	updateContacts := func(id, name string) {
-		a.UpdateContact(id, name)
-	}
+	// updateContacts := func(id, name string) {
+	// 	a.UpdateContact(id, name)
+	// }
 
-	if err := client.Handshake(usr.Name, uiWriter, updateContacts); err != nil {
+	if err := client.Handshake(usr.Name, a.WriteMessage, a.UpdateContact); err != nil {
 		return fmt.Errorf("client handshake failed: %w", err)
 	}
 
