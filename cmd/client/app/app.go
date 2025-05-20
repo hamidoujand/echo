@@ -39,6 +39,14 @@ func New(client *Client, contacts *Contacts) *App {
 	list.SetTitle("Users")
 	list.SetChangedFunc(func(index int, name, id string, shortcut rune) {
 		textView.Clear()
+
+		err := contacts.ReadMessage(id)
+		if err != nil {
+			textView.ScrollToEnd()
+			fmt.Fprintln(textView, "--------------------------------------")
+			fmt.Fprintln(textView, "system: "+err.Error())
+		}
+
 		usr, err := contacts.LookupContact(id)
 		if err != nil {
 			textView.ScrollToEnd()
@@ -158,6 +166,9 @@ func (a *App) WriteMessage(id string, msg string) {
 }
 
 func (a *App) buttonHandler() {
+	if len(a.contacts.contacts) == 0 {
+		return
+	}
 	_, receiverID := a.list.GetItemText(a.list.GetCurrentItem())
 
 	msg := a.textArea.GetText()

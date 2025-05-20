@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
@@ -40,6 +41,11 @@ type Contacts struct {
 }
 
 func NewContacts(confDir string) (*Contacts, error) {
+
+	chatHistoryPath := filepath.Join(confDir, "contacts")
+	if err := os.MkdirAll(chatHistoryPath, 0755); err != nil {
+		return nil, fmt.Errorf("chatHistory mkdirAll: %w", err)
+	}
 
 	fullPath := filepath.Join(confDir, configFilename)
 
@@ -139,6 +145,9 @@ func (c *Contacts) AddMessage(id string, msg string) error {
 	for _, usr := range c.contacts {
 		if usr.ID == id {
 			usr.Messages = append(usr.Messages, msg)
+			if err := c.writeMessage(id, msg); err != nil {
+				return fmt.Errorf("writing message into file: %w", err)
+			}
 			return nil
 		}
 	}
@@ -174,5 +183,64 @@ func (c *Contacts) AddContact(id string, name string) error {
 		return fmt.Errorf("write file %s: %w", fullPath, err)
 	}
 
+	return nil
+}
+
+func (c *Contacts) ReadMessage(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	historyFile := filepath.Join(c.dir, "contacts", id+".msg")
+
+	for _, usr := range c.contacts {
+		if len(usr.Messages) > 0 {
+			return nil
+		}
+
+		if usr.ID == id {
+			f, err := os.Open(historyFile)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				txt := scanner.Text()
+				usr.Messages = append(usr.Messages, txt)
+			}
+
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("while scanning file: %w", err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("user not found")
+}
+
+func (c *Contacts) writeMessage(id string, msg string) error {
+	filename := filepath.Join(c.dir, "contacts", id+".msg")
+	_, err := os.Stat(filename)
+	var f *os.File
+
+	if err != nil {
+		var err error
+		f, err = os.Create(filename)
+		if err != nil {
+			return fmt.Errorf("create file %s: %w", filename, err)
+		}
+	} else {
+		var err error
+		f, err = os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("openFile %s: %w", filename, err)
+		}
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(msg); err != nil {
+		return fmt.Errorf("writeString: %w", err)
+	}
 	return nil
 }
