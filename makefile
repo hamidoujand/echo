@@ -14,6 +14,9 @@ upgrade:
 client:
 	go run cmd/client/main.go 
 
+hack:
+	go run cmd/hack/main.go
+
 ###############################################################################
 # Docker 
 pull: 
