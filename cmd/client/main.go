@@ -20,18 +20,22 @@ func main() {
 }
 
 func run() error {
-	contacts, err := app.NewContacts(configDir)
+	id, err := app.NewID(configDir)
+	if err != nil {
+		return fmt.Errorf("newID: %w", err)
+	}
+
+	contacts, err := app.NewContacts(configDir, id)
 	if err != nil {
 		return fmt.Errorf("newContacts: %w", err)
 	}
 
-	usr := contacts.My()
-	client := app.NewClient(usr.ID, url, contacts)
+	client := app.NewClient(id, url, contacts)
 	defer client.Close()
 
 	a := app.New(client, contacts)
 
-	if err := client.Handshake(usr.Name, a.WriteMessage, a.UpdateContact); err != nil {
+	if err := client.Handshake(contacts.My().Name, a.WriteMessage, a.UpdateContact); err != nil {
 		return fmt.Errorf("client handshake failed: %w", err)
 	}
 

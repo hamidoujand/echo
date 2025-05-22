@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
 )
 
@@ -11,8 +12,8 @@ type UIWriter func(id, msg string)
 type UpdateContact func(id, name string)
 
 type user struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID   common.Address `json:"id"`
+	Name string         `json:"name"`
 }
 
 type outMessage struct {
@@ -21,19 +22,19 @@ type outMessage struct {
 }
 
 type inMessage struct {
-	ToID string `json:"toID"`
-	Text string `json:"text"`
+	ToID common.Address `json:"toID"`
+	Text string         `json:"text"`
 }
 
 type Client struct {
-	id       string
+	id       common.Address
 	conn     *websocket.Conn
 	url      string
 	contacts *Contacts
 	uiWriter UIWriter
 }
 
-func NewClient(id string, url string, contacts *Contacts) *Client {
+func NewClient(id common.Address, url string, contacts *Contacts) *Client {
 	return &Client{
 		id:       id,
 		url:      url,
@@ -70,7 +71,7 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 		ID   string
 		Name string
 	}{
-		ID:   c.id,
+		ID:   c.id.Hex(),
 		Name: name,
 	}
 
@@ -112,7 +113,7 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
 					return
 				}
-				updateContact(out.From.ID, out.From.Name)
+				updateContact(out.From.ID.Hex(), out.From.Name)
 			default:
 				out.From.Name = usr.Name
 			}
@@ -124,14 +125,14 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				return
 			}
 
-			uiWriter(out.From.ID, formattedMsg)
+			uiWriter(out.From.ID.Hex(), formattedMsg)
 		}
 	}()
 
 	return nil
 }
 
-func (c *Client) Send(to string, msg string) error {
+func (c *Client) Send(to common.Address, msg string) error {
 	if c.conn == nil {
 		return fmt.Errorf("no connection")
 	}
@@ -155,7 +156,7 @@ func (c *Client) Send(to string, msg string) error {
 		return fmt.Errorf("addMessage: %w", err)
 	}
 
-	c.uiWriter(to, msg)
+	c.uiWriter(to.String(), msg)
 
 	return nil
 }

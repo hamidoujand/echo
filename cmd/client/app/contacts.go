@@ -3,18 +3,20 @@ package app
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const configFilename = "config.json"
 
 type userDocument struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID   common.Address `json:"id"`
+	Name string         `json:"name"`
 }
 
 type document struct {
@@ -23,7 +25,7 @@ type document struct {
 }
 
 type User struct {
-	ID       string
+	ID       common.Address
 	Name     string
 	Messages []string
 }
@@ -36,12 +38,11 @@ type Users struct {
 type Contacts struct {
 	me       User
 	dir      string
-	contacts []User
+	contacts map[common.Address]User
 	mu       sync.RWMutex
 }
 
-func NewContacts(confDir string) (*Contacts, error) {
-
+func NewContacts(confDir string, id common.Address) (*Contacts, error) {
 	chatHistoryPath := filepath.Join(confDir, "contacts")
 	if err := os.MkdirAll(chatHistoryPath, 0755); err != nil {
 		return nil, fmt.Errorf("chatHistory mkdirAll: %w", err)
@@ -60,8 +61,6 @@ func NewContacts(confDir string) (*Contacts, error) {
 			return nil, fmt.Errorf("create file %s: %w", fullPath, err)
 		}
 		defer f.Close()
-
-		id := fmt.Sprintf("%d", rand.IntN(99999))
 
 		doc := document{
 			User: userDocument{
@@ -97,9 +96,13 @@ func NewContacts(confDir string) (*Contacts, error) {
 		return nil, fmt.Errorf("decode into doc: %w", err)
 	}
 
-	contacts := make([]User, len(doc.Contacts))
-	for i, c := range doc.Contacts {
-		contacts[i] = User{
+	if doc.User.ID != id {
+		return nil, errors.New("id mismatch")
+	}
+
+	contacts := make(map[common.Address]User, len(doc.Contacts))
+	for _, c := range doc.Contacts {
+		contacts[c.ID] = User{
 			ID:   c.ID,
 			Name: c.Name,
 		}
@@ -121,41 +124,49 @@ func (c *Contacts) My() User {
 	return c.me
 }
 
-func (c *Contacts) LookupContact(id string) (User, error) {
+func (c *Contacts) LookupContact(id common.Address) (User, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	for _, usr := range c.contacts {
-		if usr.ID == id {
-			return usr, nil
-		}
+
+	usr, ok := c.contacts[id]
+	if !ok {
+		return User{}, fmt.Errorf("contact with id %s not found", id.String())
 	}
-	return User{}, fmt.Errorf("user not found in contacts")
+	return usr, nil
 }
 
 func (c *Contacts) Contacts() []User {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.contacts
-}
-
-func (c *Contacts) AddMessage(id string, msg string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	users := make([]User, 0, len(c.contacts))
 
 	for _, usr := range c.contacts {
-		if usr.ID == id {
-			usr.Messages = append(usr.Messages, msg)
-			if err := c.writeMessage(id, msg); err != nil {
-				return fmt.Errorf("writing message into file: %w", err)
-			}
-			return nil
-		}
+		users = append(users, usr)
 	}
 
-	return fmt.Errorf("user with id %s, not found", id)
+	return users
 }
 
-func (c *Contacts) AddContact(id string, name string) error {
+func (c *Contacts) AddMessage(id common.Address, msg string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	usr, ok := c.contacts[id]
+	if !ok {
+		return fmt.Errorf("contact with id %s not found", id.String())
+	}
+
+	usr.Messages = append(usr.Messages, msg)
+	c.contacts[id] = usr
+
+	if err := c.writeMessage(id, msg); err != nil {
+		return fmt.Errorf("write message: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Contacts) AddContact(id common.Address, name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -172,7 +183,10 @@ func (c *Contacts) AddContact(id string, name string) error {
 	}
 
 	doc.Contacts = append(doc.Contacts, userDocument{ID: id, Name: name})
-	c.contacts = append(c.contacts, User{ID: id, Name: name})
+	c.contacts[id] = User{
+		ID:   id,
+		Name: name,
+	}
 
 	newData, err := json.Marshal(doc)
 	if err != nil {
@@ -186,41 +200,43 @@ func (c *Contacts) AddContact(id string, name string) error {
 	return nil
 }
 
-func (c *Contacts) ReadMessage(id string) error {
+func (c *Contacts) ReadMessage(id common.Address) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	historyFile := filepath.Join(c.dir, "contacts", id+".msg")
+	historyFile := filepath.Join(c.dir, "contacts", id.Hex()+".msg")
 
-	for _, usr := range c.contacts {
-		if len(usr.Messages) > 0 {
-			return nil
-		}
-
-		if usr.ID == id {
-			f, err := os.Open(historyFile)
-			if err != nil {
-				return nil
-			}
-			defer f.Close()
-
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				txt := scanner.Text()
-				usr.Messages = append(usr.Messages, txt)
-			}
-
-			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("while scanning file: %w", err)
-			}
-			return nil
-		}
+	usr, ok := c.contacts[id]
+	if !ok {
+		return fmt.Errorf("contact with id %s not found", id.String())
 	}
-	return fmt.Errorf("user not found")
+
+	if len(usr.Messages) > 0 {
+		return nil
+	}
+	f, err := os.Open(historyFile)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		txt := scanner.Text()
+		usr.Messages = append(usr.Messages, txt)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("while scanning file: %w", err)
+	}
+
+	c.contacts[id] = usr
+
+	return nil
 }
 
-func (c *Contacts) writeMessage(id string, msg string) error {
-	filename := filepath.Join(c.dir, "contacts", id+".msg")
+func (c *Contacts) writeMessage(id common.Address, msg string) error {
+	filename := filepath.Join(c.dir, "contacts", id.String()+".msg")
 	_, err := os.Stat(filename)
 	var f *os.File
 

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -40,14 +41,16 @@ func New(client *Client, contacts *Contacts) *App {
 	list.SetChangedFunc(func(index int, name, id string, shortcut rune) {
 		textView.Clear()
 
-		err := contacts.ReadMessage(id)
+		commonID := common.HexToAddress(id)
+
+		err := contacts.ReadMessage(commonID)
 		if err != nil {
 			textView.ScrollToEnd()
 			fmt.Fprintln(textView, "--------------------------------------")
 			fmt.Fprintln(textView, "system: "+err.Error())
 		}
 
-		usr, err := contacts.LookupContact(id)
+		usr, err := contacts.LookupContact(commonID)
 		if err != nil {
 			textView.ScrollToEnd()
 			fmt.Fprintln(textView, "--------------------------------------")
@@ -61,13 +64,13 @@ func New(client *Client, contacts *Contacts) *App {
 			}
 		}
 
-		list.SetItemText(index, usr.Name, usr.ID)
+		list.SetItemText(index, usr.Name, usr.ID.String())
 	})
 
 	users := contacts.Contacts()
 	for i, c := range users {
 		shortcut := rune(i + 49)
-		list.AddItem(c.Name, c.ID, shortcut, nil)
+		list.AddItem(c.Name, c.ID.Hex(), shortcut, nil)
 	}
 
 	// -------------------------------------------------------------------------
@@ -176,7 +179,7 @@ func (a *App) buttonHandler() {
 		return
 	}
 
-	if err := a.client.Send(receiverID, msg); err != nil {
+	if err := a.client.Send(common.HexToAddress(receiverID), msg); err != nil {
 		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
 		return
 	}
