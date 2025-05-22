@@ -16,12 +16,12 @@ type user struct {
 	Name string         `json:"name"`
 }
 
-type outMessage struct {
+type inMessage struct {
 	From user   `json:"from"`
 	Text string `json:"text"`
 }
 
-type inMessage struct {
+type outMessage struct {
 	ToID common.Address `json:"toID"`
 	Text string         `json:"text"`
 }
@@ -100,32 +100,32 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				return
 			}
 
-			var out outMessage
-			if err := json.Unmarshal(msg, &out); err != nil {
+			var inMsg inMessage
+			if err := json.Unmarshal(msg, &inMsg); err != nil {
 				uiWriter("system", fmt.Sprintf("unmarshaling message failed: %s", err))
 				return
 			}
 			//find the username
-			usr, err := c.contacts.LookupContact(out.From.ID)
+			usr, err := c.contacts.LookupContact(inMsg.From.ID)
 			switch {
 			case err != nil:
-				if err := c.contacts.AddContact(out.From.ID, out.From.Name); err != nil {
+				if err := c.contacts.AddContact(inMsg.From.ID, inMsg.From.Name); err != nil {
 					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
 					return
 				}
-				updateContact(out.From.ID.Hex(), out.From.Name)
+				updateContact(inMsg.From.ID.Hex(), inMsg.From.Name)
 			default:
-				out.From.Name = usr.Name
+				inMsg.From.Name = usr.Name
 			}
 
-			formattedMsg := formatMessage(usr.Name, out.Text)
+			formattedMsg := formatMessage(usr.Name, inMsg.Text)
 
-			if err := c.contacts.AddMessage(out.From.ID, formattedMsg); err != nil {
+			if err := c.contacts.AddMessage(inMsg.From.ID, formattedMsg); err != nil {
 				uiWriter("system", fmt.Sprintf("failed to add message: %s", err))
 				return
 			}
 
-			uiWriter(out.From.ID.Hex(), formattedMsg)
+			uiWriter(inMsg.From.ID.Hex(), formattedMsg)
 		}
 	}()
 
@@ -137,12 +137,12 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("no connection")
 	}
 
-	in := inMessage{
+	outMsg := outMessage{
 		ToID: to,
 		Text: msg,
 	}
 
-	bs, err := json.Marshal(in)
+	bs, err := json.Marshal(outMsg)
 	if err != nil {
 		return fmt.Errorf("marshaling inMessage: %w", err)
 	}
