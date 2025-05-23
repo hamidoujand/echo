@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/hamidoujand/echo/errs"
+	"github.com/hamidoujand/echo/signature"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -24,11 +26,11 @@ var (
 
 type users interface {
 	Add(usr User) error
-	Remove(userID string)
-	Retrieve(userID string) (User, error)
-	Connections() map[string]Connection
-	UpdateLastPong(usrID string) (User, error)
-	UpdateLastPing(usrID string) error
+	Remove(userID common.Address)
+	Retrieve(userID common.Address) (User, error)
+	Connections() map[common.Address]Connection
+	UpdateLastPong(usrID common.Address) (User, error)
+	UpdateLastPing(usrID common.Address) error
 }
 
 type Chat struct {
@@ -177,6 +179,27 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 
 		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage)
 
+		signedData := struct {
+			ToID  common.Address
+			Text  string
+			Nonce uint64
+		}{
+			ToID:  in.ToID,
+			Text:  in.Text,
+			Nonce: in.Nonce,
+		}
+
+		from, err := signature.FromAddress(signedData, in.V, in.R, in.S)
+		if err != nil {
+			c.log.Error("parsing signature failed", "err", err)
+			continue
+		}
+
+		if from != usr.ID.Hex() {
+			c.log.Error("signature check failed")
+			continue
+		}
+
 		to, err := c.users.Retrieve(in.ToID)
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
@@ -187,6 +210,10 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 					FromName: usr.Name,
 					ToID:     in.ToID,
 					Text:     in.Text,
+					Nonce:    in.Nonce,
+					V:        in.V,
+					R:        in.R,
+					S:        in.S,
 				}
 
 				c.sendMessageToBUS(ctx, m)
@@ -218,6 +245,27 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 	}
 	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
 
+	signedData := struct {
+		ToID  common.Address
+		Text  string
+		Nonce uint64
+	}{
+		ToID:  bm.ToID,
+		Text:  bm.Text,
+		Nonce: bm.Nonce,
+	}
+
+	fromID, err := signature.FromAddress(signedData, bm.V, bm.R, bm.S)
+	if err != nil {
+		c.log.Error("listenBUD: parsing signature failed", "err", err)
+		return
+	}
+
+	if fromID != bm.FromID.Hex() {
+		c.log.Error("listenBUS: signature check failed")
+		return
+	}
+
 	to, err := c.users.Retrieve(bm.ToID)
 	if err != nil {
 		//not found in this cap
@@ -242,7 +290,7 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 
 }
 
-func (c *Chat) pong(usrID string) func(appData string) error {
+func (c *Chat) pong(usrID common.Address) func(appData string) error {
 	h := func(appData string) error {
 		usr, err := c.users.UpdateLastPong(usrID)
 		if err != nil {

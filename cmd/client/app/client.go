@@ -25,13 +25,12 @@ type inMessage struct {
 }
 
 type outMessage struct {
-	FromID common.Address `json:"fromID"`
-	ToID   common.Address `json:"toID"`
-	Text   string         `json:"text"`
-	Nonce  uint64         `json:"nonce"`
-	V      *big.Int       `json:"v"`
-	R      *big.Int       `json:"r"`
-	S      *big.Int       `json:"s"`
+	ToID  common.Address `json:"toID"`
+	Text  string         `json:"text"`
+	Nonce uint64         `json:"nonce"`
+	V     *big.Int       `json:"v"`
+	R     *big.Int       `json:"r"`
+	S     *big.Int       `json:"s"`
 }
 
 type Client struct {
@@ -119,10 +118,13 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 			usr, err := c.contacts.LookupContact(inMsg.From.ID)
 			switch {
 			case err != nil:
-				if err := c.contacts.AddContact(inMsg.From.ID, inMsg.From.Name); err != nil {
+				var err error
+				usr, err = c.contacts.AddContact(inMsg.From.ID, inMsg.From.Name)
+				if err != nil {
 					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
 					return
 				}
+
 				updateContact(inMsg.From.ID.Hex(), inMsg.From.Name)
 			default:
 				inMsg.From.Name = usr.Name
@@ -147,19 +149,28 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("no connection")
 	}
 
-	v, r, s, err := signature.Sign(msg, c.privateKey)
+	dataToSign := struct {
+		ToID  common.Address
+		Text  string
+		Nonce uint64
+	}{
+		ToID:  to,
+		Text:  msg,
+		Nonce: 1,
+	}
+
+	v, r, s, err := signature.Sign(dataToSign, c.privateKey)
 	if err != nil {
 		return fmt.Errorf("sign: %w", err)
 	}
 
 	outMsg := outMessage{
-		FromID: c.id,
-		ToID:   to,
-		Text:   msg,
-		Nonce:  1,
-		V:      v,
-		R:      r,
-		S:      s,
+		ToID:  to,
+		Text:  msg,
+		Nonce: 1,
+		V:     v,
+		R:     r,
+		S:     s,
 	}
 
 	bs, err := json.Marshal(outMsg)

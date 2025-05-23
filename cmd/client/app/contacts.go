@@ -67,7 +67,12 @@ func NewContacts(confDir string, id common.Address) (*Contacts, error) {
 				ID:   id,
 				Name: "Anonymous",
 			},
-			Contacts: make([]userDocument, 0),
+			Contacts: []userDocument{
+				{
+					ID:   common.Address{},
+					Name: "Sample Contact",
+				},
+			},
 		}
 
 		if err := json.NewEncoder(f).Encode(doc); err != nil {
@@ -166,7 +171,7 @@ func (c *Contacts) AddMessage(id common.Address, msg string) error {
 	return nil
 }
 
-func (c *Contacts) AddContact(id common.Address, name string) error {
+func (c *Contacts) AddContact(id common.Address, name string) (User, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -174,12 +179,12 @@ func (c *Contacts) AddContact(id common.Address, name string) error {
 	// Read the entire file first
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		return fmt.Errorf("read file %s: %w", fullPath, err)
+		return User{}, fmt.Errorf("read file %s: %w", fullPath, err)
 	}
 
 	var doc document
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("decode into doc: %w", err)
+		return User{}, fmt.Errorf("decode into doc: %w", err)
 	}
 
 	doc.Contacts = append(doc.Contacts, userDocument{ID: id, Name: name})
@@ -190,14 +195,18 @@ func (c *Contacts) AddContact(id common.Address, name string) error {
 
 	newData, err := json.Marshal(doc)
 	if err != nil {
-		return fmt.Errorf("encode updates: %w", err)
+		return User{}, fmt.Errorf("encode updates: %w", err)
 	}
 
 	if err := os.WriteFile(fullPath, newData, 0644); err != nil {
-		return fmt.Errorf("write file %s: %w", fullPath, err)
+		return User{}, fmt.Errorf("write file %s: %w", fullPath, err)
 	}
 
-	return nil
+	u := User{
+		ID:   id,
+		Name: name,
+	}
+	return u, nil
 }
 
 func (c *Contacts) ReadMessage(id common.Address) error {

@@ -1,14 +1,16 @@
 package chat
 
 import (
+	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 type User struct {
-	ID       string          `json:"id"`
+	ID       common.Address  `json:"id"`
 	Name     string          `json:"name"`
 	LastPing time.Time       `json:"lastPing"`
 	LastPong time.Time       `json:"lastPong"`
@@ -16,8 +18,12 @@ type User struct {
 }
 
 type inMessage struct {
-	ToID string `json:"toID"`
-	Text string `json:"text"`
+	ToID  common.Address `json:"toID"`
+	Text  string         `json:"text"`
+	Nonce uint64         `json:"nonce"`
+	V     *big.Int       `json:"v"`
+	R     *big.Int       `json:"r"`
+	S     *big.Int       `json:"s"`
 }
 
 type outMessage struct {
@@ -26,11 +32,15 @@ type outMessage struct {
 }
 
 type busMessage struct {
-	CapID    uuid.UUID `json:"capID"`
-	FromID   string    `json:"fromID"`
-	FromName string    `json:"fromName"`
-	ToID     string    `json:"toID"`
-	Text     string    `json:"text"`
+	CapID    uuid.UUID      `json:"capID"`
+	FromID   common.Address `json:"fromID"`
+	FromName string         `json:"fromName"`
+	ToID     common.Address `json:"toID"`
+	Text     string         `json:"text"`
+	Nonce    uint64         `json:"nonce"`
+	V        *big.Int       `json:"v"`
+	R        *big.Int       `json:"r"`
+	S        *big.Int       `json:"s"`
 }
 
 type Connection struct {
