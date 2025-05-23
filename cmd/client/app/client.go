@@ -1,11 +1,14 @@
 package app
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
+	"github.com/hamidoujand/echo/signature"
 )
 
 type UIWriter func(id, msg string)
@@ -22,23 +25,30 @@ type inMessage struct {
 }
 
 type outMessage struct {
-	ToID common.Address `json:"toID"`
-	Text string         `json:"text"`
+	FromID common.Address `json:"fromID"`
+	ToID   common.Address `json:"toID"`
+	Text   string         `json:"text"`
+	Nonce  uint64         `json:"nonce"`
+	V      *big.Int       `json:"v"`
+	R      *big.Int       `json:"r"`
+	S      *big.Int       `json:"s"`
 }
 
 type Client struct {
-	id       common.Address
-	conn     *websocket.Conn
-	url      string
-	contacts *Contacts
-	uiWriter UIWriter
+	privateKey *ecdsa.PrivateKey
+	id         common.Address
+	conn       *websocket.Conn
+	url        string
+	contacts   *Contacts
+	uiWriter   UIWriter
 }
 
-func NewClient(id common.Address, url string, contacts *Contacts) *Client {
+func NewClient(id common.Address, private *ecdsa.PrivateKey, url string, contacts *Contacts) *Client {
 	return &Client{
-		id:       id,
-		url:      url,
-		contacts: contacts,
+		privateKey: private,
+		id:         id,
+		url:        url,
+		contacts:   contacts,
 	}
 }
 
@@ -137,9 +147,19 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("no connection")
 	}
 
+	v, r, s, err := signature.Sign(msg, c.privateKey)
+	if err != nil {
+		return fmt.Errorf("sign: %w", err)
+	}
+
 	outMsg := outMessage{
-		ToID: to,
-		Text: msg,
+		FromID: c.id,
+		ToID:   to,
+		Text:   msg,
+		Nonce:  1,
+		V:      v,
+		R:      r,
+		S:      s,
 	}
 
 	bs, err := json.Marshal(outMsg)

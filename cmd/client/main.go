@@ -20,7 +20,7 @@ func main() {
 }
 
 func run() error {
-	id, err := app.NewID(configDir)
+	id, privateKey, err := app.NewID(configDir)
 	if err != nil {
 		return fmt.Errorf("newID: %w", err)
 	}
@@ -30,7 +30,7 @@ func run() error {
 		return fmt.Errorf("newContacts: %w", err)
 	}
 
-	client := app.NewClient(id, url, contacts)
+	client := app.NewClient(id, privateKey, url, contacts)
 	defer client.Close()
 
 	a := app.New(client, contacts)
