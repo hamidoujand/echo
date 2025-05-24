@@ -12,16 +12,17 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const configFilename = "config.json"
+const dbFilename = "data.json"
+const chatHistoryDir = "messages"
 
-type userDocument struct {
+type accountUser struct {
 	ID   common.Address `json:"id"`
 	Name string         `json:"name"`
 }
 
-type document struct {
-	User     userDocument   `json:"user"`
-	Contacts []userDocument `json:"contacts"`
+type account struct {
+	MyAccount accountUser   `json:"myAccount"`
+	Contacts  []accountUser `json:"contacts"`
 }
 
 type User struct {
@@ -35,20 +36,20 @@ type Users struct {
 	Contacts []User
 }
 
-type Contacts struct {
-	me       User
-	dir      string
-	contacts map[common.Address]User
-	mu       sync.RWMutex
+type Database struct {
+	myAccount User
+	dir       string
+	contacts  map[common.Address]User
+	mu        sync.RWMutex
 }
 
-func NewContacts(confDir string, id common.Address) (*Contacts, error) {
-	chatHistoryPath := filepath.Join(confDir, "contacts")
+func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) {
+	chatHistoryPath := filepath.Join(confDir, chatHistoryDir)
 	if err := os.MkdirAll(chatHistoryPath, 0755); err != nil {
 		return nil, fmt.Errorf("chatHistory mkdirAll: %w", err)
 	}
 
-	fullPath := filepath.Join(confDir, configFilename)
+	fullPath := filepath.Join(confDir, dbFilename)
 
 	//file not exists
 	if _, err := os.Stat(fullPath); err != nil {
@@ -62,12 +63,12 @@ func NewContacts(confDir string, id common.Address) (*Contacts, error) {
 		}
 		defer f.Close()
 
-		doc := document{
-			User: userDocument{
-				ID:   id,
+		doc := account{
+			MyAccount: accountUser{
+				ID:   myAccountID,
 				Name: "Anonymous",
 			},
-			Contacts: []userDocument{
+			Contacts: []accountUser{
 				{
 					ID:   common.Address{},
 					Name: "Sample Contact",
@@ -79,15 +80,15 @@ func NewContacts(confDir string, id common.Address) (*Contacts, error) {
 			return nil, fmt.Errorf("encoding cfg to file: %w", err)
 		}
 
-		cfg := Contacts{
-			me: User{
-				ID:   doc.User.ID,
-				Name: doc.User.Name,
+		db := Database{
+			myAccount: User{
+				ID:   doc.MyAccount.ID,
+				Name: doc.MyAccount.Name,
 			},
 			dir: confDir,
 		}
 
-		return &cfg, nil
+		return &db, nil
 	}
 	//file exists
 	f, err := os.Open(fullPath)
@@ -96,104 +97,105 @@ func NewContacts(confDir string, id common.Address) (*Contacts, error) {
 	}
 	defer f.Close()
 
-	var doc document
-	if err := json.NewDecoder(f).Decode(&doc); err != nil {
-		return nil, fmt.Errorf("decode into doc: %w", err)
+	var acc account
+	if err := json.NewDecoder(f).Decode(&acc); err != nil {
+		return nil, fmt.Errorf("decode into account: %w", err)
 	}
 
-	if doc.User.ID != id {
+	if acc.MyAccount.ID != myAccountID {
 		return nil, errors.New("id mismatch")
 	}
 
-	contacts := make(map[common.Address]User, len(doc.Contacts))
-	for _, c := range doc.Contacts {
+	contacts := make(map[common.Address]User, len(acc.Contacts))
+	for _, c := range acc.Contacts {
 		contacts[c.ID] = User{
 			ID:   c.ID,
 			Name: c.Name,
 		}
 	}
 
-	c := Contacts{
-		me: User{
-			ID:   doc.User.ID,
-			Name: doc.User.Name,
+	c := Database{
+		myAccount: User{
+			ID:   acc.MyAccount.ID,
+			Name: acc.MyAccount.Name,
 		},
 		contacts: contacts,
 	}
 	return &c, nil
 }
 
-func (c *Contacts) My() User {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.me
+func (db *Database) MyAccount() User {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return db.myAccount
 }
 
-func (c *Contacts) LookupContact(id common.Address) (User, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func (db *Database) LookupContact(id common.Address) (User, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
 
-	usr, ok := c.contacts[id]
+	usr, ok := db.contacts[id]
 	if !ok {
 		return User{}, fmt.Errorf("contact with id %s not found", id.String())
 	}
 	return usr, nil
 }
 
-func (c *Contacts) Contacts() []User {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	users := make([]User, 0, len(c.contacts))
+func (db *Database) Contacts() []User {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	users := make([]User, 0, len(db.contacts))
 
-	for _, usr := range c.contacts {
+	for _, usr := range db.contacts {
 		users = append(users, usr)
 	}
 
 	return users
 }
 
-func (c *Contacts) AddMessage(id common.Address, msg string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (db *Database) AddMessage(id common.Address, msg string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 
-	usr, ok := c.contacts[id]
+	usr, ok := db.contacts[id]
 	if !ok {
 		return fmt.Errorf("contact with id %s not found", id.String())
 	}
 
 	usr.Messages = append(usr.Messages, msg)
-	c.contacts[id] = usr
+	db.contacts[id] = usr
 
-	if err := c.writeMessage(id, msg); err != nil {
+	if err := db.writeMessage(id, msg); err != nil {
 		return fmt.Errorf("write message: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Contacts) AddContact(id common.Address, name string) (User, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (db *Database) AddContact(id common.Address, name string) (User, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 
-	fullPath := filepath.Join(c.dir, configFilename)
-	// Read the entire file first
+	fullPath := filepath.Join(db.dir, dbFilename)
+
+	// Read the entire db file first
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return User{}, fmt.Errorf("read file %s: %w", fullPath, err)
 	}
 
-	var doc document
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return User{}, fmt.Errorf("decode into doc: %w", err)
+	var acc account
+	if err := json.Unmarshal(data, &acc); err != nil {
+		return User{}, fmt.Errorf("decode into account: %w", err)
 	}
 
-	doc.Contacts = append(doc.Contacts, userDocument{ID: id, Name: name})
-	c.contacts[id] = User{
+	acc.Contacts = append(acc.Contacts, accountUser{ID: id, Name: name})
+	db.contacts[id] = User{
 		ID:   id,
 		Name: name,
 	}
 
-	newData, err := json.Marshal(doc)
+	newData, err := json.Marshal(acc)
 	if err != nil {
 		return User{}, fmt.Errorf("encode updates: %w", err)
 	}
@@ -209,13 +211,13 @@ func (c *Contacts) AddContact(id common.Address, name string) (User, error) {
 	return u, nil
 }
 
-func (c *Contacts) ReadMessage(id common.Address) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (db *Database) ReadMessage(id common.Address) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 
-	historyFile := filepath.Join(c.dir, "contacts", id.Hex()+".msg")
+	historyFile := filepath.Join(db.dir, chatHistoryDir, id.Hex()+".msg")
 
-	usr, ok := c.contacts[id]
+	usr, ok := db.contacts[id]
 	if !ok {
 		return fmt.Errorf("contact with id %s not found", id.String())
 	}
@@ -239,13 +241,13 @@ func (c *Contacts) ReadMessage(id common.Address) error {
 		return fmt.Errorf("while scanning file: %w", err)
 	}
 
-	c.contacts[id] = usr
+	db.contacts[id] = usr
 
 	return nil
 }
 
-func (c *Contacts) writeMessage(id common.Address, msg string) error {
-	filename := filepath.Join(c.dir, "contacts", id.String()+".msg")
+func (db *Database) writeMessage(id common.Address, msg string) error {
+	filename := filepath.Join(db.dir, chatHistoryDir, id.String()+".msg")
 	_, err := os.Stat(filename)
 	var f *os.File
 

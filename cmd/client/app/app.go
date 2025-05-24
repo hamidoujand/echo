@@ -16,10 +16,10 @@ type App struct {
 	list     *tview.List
 	textArea *tview.TextArea
 	client   *Client
-	contacts *Contacts
+	contacts *Database
 }
 
-func New(client *Client, contacts *Contacts) *App {
+func New(client *Client, contacts *Database) *App {
 
 	app := tview.NewApplication()
 
@@ -32,7 +32,7 @@ func New(client *Client, contacts *Contacts) *App {
 		})
 
 	textView.SetBorder(true)
-	textView.SetTitle(fmt.Sprintf("*** %s ***", contacts.My().ID))
+	textView.SetTitle(fmt.Sprintf("*** %s ***", contacts.MyAccount().ID))
 	// -------------------------------------------------------------------------
 
 	list := tview.NewList()

@@ -38,11 +38,11 @@ type Client struct {
 	id         common.Address
 	conn       *websocket.Conn
 	url        string
-	contacts   *Contacts
+	contacts   *Database
 	uiWriter   UIWriter
 }
 
-func NewClient(id common.Address, private *ecdsa.PrivateKey, url string, contacts *Contacts) *Client {
+func NewClient(id common.Address, private *ecdsa.PrivateKey, url string, contacts *Database) *Client {
 	return &Client{
 		privateKey: private,
 		id:         id,

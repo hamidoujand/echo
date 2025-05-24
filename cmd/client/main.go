@@ -25,7 +25,7 @@ func run() error {
 		return fmt.Errorf("newID: %w", err)
 	}
 
-	contacts, err := app.NewContacts(configDir, id)
+	contacts, err := app.NewDatabase(configDir, id)
 	if err != nil {
 		return fmt.Errorf("newContacts: %w", err)
 	}
@@ -35,7 +35,7 @@ func run() error {
 
 	a := app.New(client, contacts)
 
-	if err := client.Handshake(contacts.My().Name, a.WriteMessage, a.UpdateContact); err != nil {
+	if err := client.Handshake(contacts.MyAccount().Name, a.WriteMessage, a.UpdateContact); err != nil {
 		return fmt.Errorf("client handshake failed: %w", err)
 	}
 
