@@ -180,13 +180,13 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage)
 
 		signedData := struct {
-			ToID  common.Address
-			Text  string
-			Nonce uint64
+			ToID      common.Address
+			Text      string
+			FromNonce uint64
 		}{
-			ToID:  in.ToID,
-			Text:  in.Text,
-			Nonce: in.Nonce,
+			ToID:      in.ToID,
+			Text:      in.Text,
+			FromNonce: in.FromNonce,
 		}
 
 		from, err := signature.FromAddress(signedData, in.V, in.R, in.S)
@@ -205,15 +205,15 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 			if errors.Is(err, ErrUserNotFound) {
 				//send to the BUS
 				m := busMessage{
-					CapID:    c.capID,
-					FromID:   usr.ID,
-					FromName: usr.Name,
-					ToID:     in.ToID,
-					Text:     in.Text,
-					Nonce:    in.Nonce,
-					V:        in.V,
-					R:        in.R,
-					S:        in.S,
+					CapID:     c.capID,
+					FromID:    usr.ID,
+					FromName:  usr.Name,
+					ToID:      in.ToID,
+					Text:      in.Text,
+					FromNonce: in.FromNonce,
+					V:         in.V,
+					R:         in.R,
+					S:         in.S,
 				}
 
 				c.sendMessageToBUS(ctx, m)
@@ -224,7 +224,7 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 			continue
 		}
 
-		if err := c.sendMessage(usr, to, in.Text); err != nil {
+		if err := c.sendMessage(usr, to, in.FromNonce, in.Text); err != nil {
 			c.log.Error("sending message failed", "err", err)
 		}
 
@@ -233,6 +233,13 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 }
 
 func (c *Chat) ListenBUS(msg jetstream.Msg) {
+
+	defer func() {
+		if err := msg.Ack(); err != nil {
+			c.log.Error("failed to ack the message", "err", err)
+		}
+	}()
+
 	//create the inMessage
 	var bm busMessage
 	if err := json.Unmarshal(msg.Data(), &bm); err != nil {
@@ -246,13 +253,13 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
 
 	signedData := struct {
-		ToID  common.Address
-		Text  string
-		Nonce uint64
+		ToID      common.Address
+		Text      string
+		FromNonce uint64
 	}{
-		ToID:  bm.ToID,
-		Text:  bm.Text,
-		Nonce: bm.Nonce,
+		ToID:      bm.ToID,
+		Text:      bm.Text,
+		FromNonce: bm.FromNonce,
 	}
 
 	fromID, err := signature.FromAddress(signedData, bm.V, bm.R, bm.S)
@@ -278,12 +285,8 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 		Name: bm.FromName,
 	}
 
-	if err := c.sendMessage(from, to, bm.Text); err != nil {
+	if err := c.sendMessage(from, to, bm.FromNonce, bm.Text); err != nil {
 		c.log.Error("listenBUS: sending message failed", "err", err)
-	}
-
-	if err := msg.Ack(); err != nil {
-		c.log.Error("failed to ack the message", "err", err)
 	}
 
 	c.log.Info("listenBUS: sent message", "from", bm.FromID, "to", to.ID)
@@ -377,9 +380,9 @@ func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
 	}
 }
 
-func (c *Chat) sendMessage(from User, to User, msg string) error {
+func (c *Chat) sendMessage(from User, to User, fromNonce uint64, msg string) error {
 	m := outMessage{
-		From: User{ID: from.ID, Name: from.Name},
+		From: outgoingUser{ID: from.ID, Name: from.Name, Nonce: fromNonce},
 		Text: msg,
 	}
 

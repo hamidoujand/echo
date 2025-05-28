@@ -16,10 +16,10 @@ type App struct {
 	list     *tview.List
 	textArea *tview.TextArea
 	client   *Client
-	contacts *Database
+	db       *Database
 }
 
-func New(client *Client, contacts *Database) *App {
+func New(client *Client, db *Database) *App {
 
 	app := tview.NewApplication()
 
@@ -32,7 +32,7 @@ func New(client *Client, contacts *Database) *App {
 		})
 
 	textView.SetBorder(true)
-	textView.SetTitle(fmt.Sprintf("*** %s ***", contacts.MyAccount().ID))
+	textView.SetTitle(fmt.Sprintf("*** %s ***", db.MyAccount().ID))
 	// -------------------------------------------------------------------------
 
 	list := tview.NewList()
@@ -43,14 +43,14 @@ func New(client *Client, contacts *Database) *App {
 
 		commonID := common.HexToAddress(id)
 
-		err := contacts.ReadMessage(commonID)
+		err := db.ReadMessage(commonID)
 		if err != nil {
 			textView.ScrollToEnd()
 			fmt.Fprintln(textView, "--------------------------------------")
 			fmt.Fprintln(textView, "system: "+err.Error())
 		}
 
-		usr, err := contacts.LookupContact(commonID)
+		usr, err := db.LookupContact(commonID)
 		if err != nil {
 			textView.ScrollToEnd()
 			fmt.Fprintln(textView, "--------------------------------------")
@@ -67,7 +67,7 @@ func New(client *Client, contacts *Database) *App {
 		list.SetItemText(index, usr.Name, usr.ID.String())
 	})
 
-	users := contacts.Contacts()
+	users := db.Contacts()
 	for i, c := range users {
 		shortcut := rune(i + 49)
 		list.AddItem(c.Name, c.ID.Hex(), shortcut, nil)
@@ -121,7 +121,7 @@ func New(client *Client, contacts *Database) *App {
 		textArea: textArea,
 		client:   client,
 		list:     list,
-		contacts: contacts,
+		db:       db,
 	}
 
 	button.SetSelectedFunc(a.buttonHandler)
@@ -169,7 +169,7 @@ func (a *App) WriteMessage(id string, msg string) {
 }
 
 func (a *App) buttonHandler() {
-	if len(a.contacts.contacts) == 0 {
+	if len(a.db.contacts) == 0 {
 		return
 	}
 	_, receiverID := a.list.GetItemText(a.list.GetCurrentItem())
@@ -179,7 +179,9 @@ func (a *App) buttonHandler() {
 		return
 	}
 
-	if err := a.client.Send(common.HexToAddress(receiverID), msg); err != nil {
+	id := common.HexToAddress(receiverID)
+
+	if err := a.client.Send(id, msg); err != nil {
 		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
 		return
 	}

@@ -17,30 +17,36 @@ type User struct {
 	Conn     *websocket.Conn `json:"-"`
 }
 
-type inMessage struct {
-	ToID  common.Address `json:"toID"`
-	Text  string         `json:"text"`
+type outgoingUser struct {
+	ID    common.Address `json:"id"`
+	Name  string         `json:"name"`
 	Nonce uint64         `json:"nonce"`
-	V     *big.Int       `json:"v"`
-	R     *big.Int       `json:"r"`
-	S     *big.Int       `json:"s"`
+}
+
+type inMessage struct {
+	ToID      common.Address `json:"toID"`
+	Text      string         `json:"text"`
+	FromNonce uint64         `json:"fromNonce"`
+	V         *big.Int       `json:"v"`
+	R         *big.Int       `json:"r"`
+	S         *big.Int       `json:"s"`
 }
 
 type outMessage struct {
-	From User   `json:"from"`
-	Text string `json:"text"`
+	From outgoingUser `json:"from"`
+	Text string       `json:"text"`
 }
 
 type busMessage struct {
-	CapID    uuid.UUID      `json:"capID"`
-	FromID   common.Address `json:"fromID"`
-	FromName string         `json:"fromName"`
-	ToID     common.Address `json:"toID"`
-	Text     string         `json:"text"`
-	Nonce    uint64         `json:"nonce"`
-	V        *big.Int       `json:"v"`
-	R        *big.Int       `json:"r"`
-	S        *big.Int       `json:"s"`
+	CapID     uuid.UUID      `json:"capID"`
+	FromID    common.Address `json:"fromID"`
+	FromName  string         `json:"fromName"`
+	ToID      common.Address `json:"toID"`
+	Text      string         `json:"text"`
+	FromNonce uint64         `json:"fromNonce"`
+	V         *big.Int       `json:"v"`
+	R         *big.Int       `json:"r"`
+	S         *big.Int       `json:"s"`
 }
 
 type Connection struct {

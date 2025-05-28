@@ -15,8 +15,9 @@ type UIWriter func(id, msg string)
 type UpdateContact func(id, name string)
 
 type user struct {
-	ID   common.Address `json:"id"`
-	Name string         `json:"name"`
+	ID    common.Address `json:"id"`
+	Name  string         `json:"name"`
+	Nonce uint64         `json:"nonce"`
 }
 
 type inMessage struct {
@@ -25,12 +26,12 @@ type inMessage struct {
 }
 
 type outMessage struct {
-	ToID  common.Address `json:"toID"`
-	Text  string         `json:"text"`
-	Nonce uint64         `json:"nonce"`
-	V     *big.Int       `json:"v"`
-	R     *big.Int       `json:"r"`
-	S     *big.Int       `json:"s"`
+	ToID      common.Address `json:"toID"`
+	Text      string         `json:"text"`
+	FromNonce uint64         `json:"fromNonce"`
+	V         *big.Int       `json:"v"`
+	R         *big.Int       `json:"r"`
+	S         *big.Int       `json:"s"`
 }
 
 type Client struct {
@@ -38,16 +39,16 @@ type Client struct {
 	id         common.Address
 	conn       *websocket.Conn
 	url        string
-	contacts   *Database
+	db         *Database
 	uiWriter   UIWriter
 }
 
-func NewClient(id common.Address, private *ecdsa.PrivateKey, url string, contacts *Database) *Client {
+func NewClient(id common.Address, private *ecdsa.PrivateKey, url string, db *Database) *Client {
 	return &Client{
 		privateKey: private,
 		id:         id,
 		url:        url,
-		contacts:   contacts,
+		db:         db,
 	}
 }
 
@@ -115,11 +116,11 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				return
 			}
 			//find the username
-			usr, err := c.contacts.LookupContact(inMsg.From.ID)
+			usr, err := c.db.LookupContact(inMsg.From.ID)
 			switch {
 			case err != nil:
 				var err error
-				usr, err = c.contacts.AddContact(inMsg.From.ID, inMsg.From.Name)
+				usr, err = c.db.AddContact(inMsg.From.ID, inMsg.From.Name)
 				if err != nil {
 					uiWriter("system", fmt.Sprintf("failed to add user into contacts: %s", err))
 					return
@@ -130,9 +131,22 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				inMsg.From.Name = usr.Name
 			}
 
+			//check nonce
+			expectedNonce := usr.LastNonce + 1
+			if expectedNonce != inMsg.From.Nonce {
+				uiWriter("system", fmt.Sprintf("invalid nonce: got %d, expected %d", inMsg.From.Nonce, expectedNonce))
+				return
+			}
+
+			//update nonce to the new value
+			if err := c.db.UpdateContactNonce(inMsg.From.ID, expectedNonce); err != nil {
+				uiWriter("system", fmt.Sprintf("failed to update contact nonce: %s", err))
+				return
+			}
+
 			formattedMsg := formatMessage(usr.Name, inMsg.Text)
 
-			if err := c.contacts.AddMessage(inMsg.From.ID, formattedMsg); err != nil {
+			if err := c.db.AddMessage(inMsg.From.ID, formattedMsg); err != nil {
 				uiWriter("system", fmt.Sprintf("failed to add message: %s", err))
 				return
 			}
@@ -149,14 +163,21 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("no connection")
 	}
 
+	usr, err := c.db.LookupContact(to)
+	if err != nil {
+		return fmt.Errorf("lookup contact: %w", err)
+	}
+
+	nonce := usr.AppLastNonce + 1
+
 	dataToSign := struct {
-		ToID  common.Address
-		Text  string
-		Nonce uint64
+		ToID      common.Address
+		Text      string
+		FromNonce uint64
 	}{
-		ToID:  to,
-		Text:  msg,
-		Nonce: 1,
+		ToID:      to,
+		Text:      msg,
+		FromNonce: nonce,
 	}
 
 	v, r, s, err := signature.Sign(dataToSign, c.privateKey)
@@ -165,12 +186,12 @@ func (c *Client) Send(to common.Address, msg string) error {
 	}
 
 	outMsg := outMessage{
-		ToID:  to,
-		Text:  msg,
-		Nonce: 1,
-		V:     v,
-		R:     r,
-		S:     s,
+		ToID:      to,
+		Text:      msg,
+		FromNonce: nonce,
+		V:         v,
+		R:         r,
+		S:         s,
 	}
 
 	bs, err := json.Marshal(outMsg)
@@ -182,8 +203,12 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("writing message to the conn: %w", err)
 	}
 
+	if err := c.db.UpdateAppNonce(to, nonce); err != nil {
+		return fmt.Errorf("updateAppNonce: %w", err)
+	}
+
 	msg = formatMessage("You", msg)
-	if err := c.contacts.AddMessage(to, msg); err != nil {
+	if err := c.db.AddMessage(to, msg); err != nil {
 		return fmt.Errorf("addMessage: %w", err)
 	}
 

@@ -15,20 +15,29 @@ import (
 const dbFilename = "data.json"
 const chatHistoryDir = "messages"
 
-type accountUser struct {
+type profile struct {
 	ID   common.Address `json:"id"`
 	Name string         `json:"name"`
 }
 
+type contact struct {
+	ID           common.Address `json:"id"`
+	Name         string         `json:"name"`
+	AppLastNonce uint64         `json:"appLastNonce"`
+	LastNonce    uint64         `json:"lastNonce"`
+}
+
 type account struct {
-	MyAccount accountUser   `json:"myAccount"`
-	Contacts  []accountUser `json:"contacts"`
+	MyAccount profile   `json:"myAccount"`
+	Contacts  []contact `json:"contacts"`
 }
 
 type User struct {
-	ID       common.Address
-	Name     string
-	Messages []string
+	ID           common.Address
+	Name         string
+	AppLastNonce uint64
+	LastNonce    uint64
+	Messages     []string
 }
 
 type Users struct {
@@ -64,11 +73,11 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 		defer f.Close()
 
 		doc := account{
-			MyAccount: accountUser{
+			MyAccount: profile{
 				ID:   myAccountID,
 				Name: "Anonymous",
 			},
-			Contacts: []accountUser{
+			Contacts: []contact{
 				{
 					ID:   common.Address{},
 					Name: "Sample Contact",
@@ -109,8 +118,10 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 	contacts := make(map[common.Address]User, len(acc.Contacts))
 	for _, c := range acc.Contacts {
 		contacts[c.ID] = User{
-			ID:   c.ID,
-			Name: c.Name,
+			ID:           c.ID,
+			Name:         c.Name,
+			AppLastNonce: c.AppLastNonce,
+			LastNonce:    c.LastNonce,
 		}
 	}
 
@@ -189,7 +200,7 @@ func (db *Database) AddContact(id common.Address, name string) (User, error) {
 		return User{}, fmt.Errorf("decode into account: %w", err)
 	}
 
-	acc.Contacts = append(acc.Contacts, accountUser{ID: id, Name: name})
+	acc.Contacts = append(acc.Contacts, contact{ID: id, Name: name})
 	db.contacts[id] = User{
 		ID:   id,
 		Name: name,
@@ -269,5 +280,103 @@ func (db *Database) writeMessage(id common.Address, msg string) error {
 	if _, err := f.WriteString(msg); err != nil {
 		return fmt.Errorf("writeString: %w", err)
 	}
+	return nil
+}
+
+func (db *Database) UpdateAppNonce(id common.Address, appNonce uint64) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	//update the in-memory cache
+	u, ok := db.contacts[id]
+	if !ok {
+		return fmt.Errorf("user with id %s, not found", id.Hex())
+	}
+
+	u.AppLastNonce = appNonce
+
+	db.contacts[id] = u
+
+	//update the disk
+
+	fullPath := filepath.Join(db.dir, dbFilename)
+
+	// Read the entire db file first
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", fullPath, err)
+	}
+
+	var acc account
+	if err := json.Unmarshal(data, &acc); err != nil {
+		return fmt.Errorf("decode into account: %w", err)
+	}
+
+	//TODO: change to map[string]Account for performance.
+	for i := range acc.Contacts {
+		if acc.Contacts[i].ID == id {
+			acc.Contacts[i].AppLastNonce = appNonce
+			break
+		}
+	}
+
+	newData, err := json.Marshal(acc)
+	if err != nil {
+		return fmt.Errorf("encode updates: %w", err)
+	}
+
+	if err := os.WriteFile(fullPath, newData, 0644); err != nil {
+		return fmt.Errorf("write file %s: %w", fullPath, err)
+	}
+
+	return nil
+}
+
+func (db *Database) UpdateContactNonce(id common.Address, contactNonce uint64) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	//update the in-memory cache
+	u, ok := db.contacts[id]
+	if !ok {
+		return fmt.Errorf("user with id %s, not found", id.Hex())
+	}
+
+	u.LastNonce = contactNonce
+
+	db.contacts[id] = u
+
+	//update the disk
+
+	fullPath := filepath.Join(db.dir, dbFilename)
+
+	// Read the entire db file first
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", fullPath, err)
+	}
+
+	var acc account
+	if err := json.Unmarshal(data, &acc); err != nil {
+		return fmt.Errorf("decode into account: %w", err)
+	}
+
+	//TODO: change to map[string]Account for performance.
+	for i := range acc.Contacts {
+		if acc.Contacts[i].ID == id {
+			acc.Contacts[i].LastNonce = contactNonce
+			break
+		}
+	}
+
+	newData, err := json.Marshal(acc)
+	if err != nil {
+		return fmt.Errorf("encode updates: %w", err)
+	}
+
+	if err := os.WriteFile(fullPath, newData, 0644); err != nil {
+		return fmt.Errorf("write file %s: %w", fullPath, err)
+	}
+
 	return nil
 }

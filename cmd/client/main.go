@@ -25,17 +25,17 @@ func run() error {
 		return fmt.Errorf("newID: %w", err)
 	}
 
-	contacts, err := app.NewDatabase(configDir, id)
+	db, err := app.NewDatabase(configDir, id)
 	if err != nil {
-		return fmt.Errorf("newContacts: %w", err)
+		return fmt.Errorf("newDatabase: %w", err)
 	}
 
-	client := app.NewClient(id, privateKey, url, contacts)
+	client := app.NewClient(id, privateKey, url, db)
 	defer client.Close()
 
-	a := app.New(client, contacts)
+	a := app.New(client, db)
 
-	if err := client.Handshake(contacts.MyAccount().Name, a.WriteMessage, a.UpdateContact); err != nil {
+	if err := client.Handshake(db.MyAccount().Name, a.WriteMessage, a.UpdateContact); err != nil {
 		return fmt.Errorf("client handshake failed: %w", err)
 	}
 

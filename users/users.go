@@ -10,9 +10,9 @@ import (
 )
 
 type Users struct {
-	log       *slog.Logger
-	users     map[common.Address]chat.User
-	usersLock sync.RWMutex
+	log   *slog.Logger
+	users map[common.Address]chat.User
+	mu    sync.RWMutex
 }
 
 func New(log *slog.Logger) *Users {
@@ -23,8 +23,8 @@ func New(log *slog.Logger) *Users {
 }
 
 func (u *Users) Add(usr chat.User) error {
-	u.usersLock.Lock()
-	defer u.usersLock.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	if _, ok := u.users[usr.ID]; ok {
 		return chat.ErrUserAlreadyExists
@@ -36,8 +36,8 @@ func (u *Users) Add(usr chat.User) error {
 }
 
 func (u *Users) Retrieve(userID common.Address) (chat.User, error) {
-	u.usersLock.RLock()
-	defer u.usersLock.RUnlock()
+	u.mu.RLock()
+	defer u.mu.RUnlock()
 	usr, ok := u.users[userID]
 	if !ok {
 		return chat.User{}, chat.ErrUserNotFound
@@ -47,8 +47,8 @@ func (u *Users) Retrieve(userID common.Address) (chat.User, error) {
 }
 
 func (u *Users) Connections() map[common.Address]chat.Connection {
-	u.usersLock.RLock()
-	defer u.usersLock.RUnlock()
+	u.mu.RLock()
+	defer u.mu.RUnlock()
 
 	result := make(map[common.Address]chat.Connection)
 	for id, usr := range u.users {
@@ -65,8 +65,8 @@ func (u *Users) Connections() map[common.Address]chat.Connection {
 }
 
 func (u *Users) Remove(userID common.Address) {
-	u.usersLock.Lock()
-	defer u.usersLock.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	usr, ok := u.users[userID]
 	if !ok {
@@ -79,8 +79,8 @@ func (u *Users) Remove(userID common.Address) {
 }
 
 func (u *Users) UpdateLastPong(usrID common.Address) (chat.User, error) {
-	u.usersLock.Lock()
-	defer u.usersLock.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	usr, exists := u.users[usrID]
 	if !exists {
@@ -92,8 +92,8 @@ func (u *Users) UpdateLastPong(usrID common.Address) (chat.User, error) {
 }
 
 func (u *Users) UpdateLastPing(usrID common.Address) error {
-	u.usersLock.Lock()
-	defer u.usersLock.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	usr, exists := u.users[usrID]
 	if !exists {
