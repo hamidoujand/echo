@@ -21,10 +21,12 @@ type profile struct {
 }
 
 type contact struct {
-	ID           common.Address `json:"id"`
-	Name         string         `json:"name"`
-	AppLastNonce uint64         `json:"appLastNonce"`
-	LastNonce    uint64         `json:"lastNonce"`
+	ID   common.Address `json:"id"`
+	Name string         `json:"name"`
+	// Nonces for messages YOU send to THIS contact.
+	OutgoingNonce uint64 `json:"outgoingNonce"`
+	// Nonces for messages THIS contact sends to YOU
+	IncomingNonce uint64 `json:"incomingNonce"`
 }
 
 type account struct {
@@ -33,11 +35,11 @@ type account struct {
 }
 
 type User struct {
-	ID           common.Address
-	Name         string
-	AppLastNonce uint64
-	LastNonce    uint64
-	Messages     []string
+	ID            common.Address
+	Name          string
+	OutgoingNonce uint64
+	IncomingNonce uint64
+	Messages      []string
 }
 
 type Users struct {
@@ -118,10 +120,10 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 	contacts := make(map[common.Address]User, len(acc.Contacts))
 	for _, c := range acc.Contacts {
 		contacts[c.ID] = User{
-			ID:           c.ID,
-			Name:         c.Name,
-			AppLastNonce: c.AppLastNonce,
-			LastNonce:    c.LastNonce,
+			ID:            c.ID,
+			Name:          c.Name,
+			OutgoingNonce: c.OutgoingNonce,
+			IncomingNonce: c.IncomingNonce,
 		}
 	}
 
@@ -283,7 +285,7 @@ func (db *Database) writeMessage(id common.Address, msg string) error {
 	return nil
 }
 
-func (db *Database) UpdateAppNonce(id common.Address, appNonce uint64) error {
+func (db *Database) UpdateOutgoingNonce(id common.Address, appNonce uint64) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -293,7 +295,7 @@ func (db *Database) UpdateAppNonce(id common.Address, appNonce uint64) error {
 		return fmt.Errorf("user with id %s, not found", id.Hex())
 	}
 
-	u.AppLastNonce = appNonce
+	u.OutgoingNonce = appNonce
 
 	db.contacts[id] = u
 
@@ -315,7 +317,7 @@ func (db *Database) UpdateAppNonce(id common.Address, appNonce uint64) error {
 	//TODO: change to map[string]Account for performance.
 	for i := range acc.Contacts {
 		if acc.Contacts[i].ID == id {
-			acc.Contacts[i].AppLastNonce = appNonce
+			acc.Contacts[i].OutgoingNonce = appNonce
 			break
 		}
 	}
@@ -332,7 +334,7 @@ func (db *Database) UpdateAppNonce(id common.Address, appNonce uint64) error {
 	return nil
 }
 
-func (db *Database) UpdateContactNonce(id common.Address, contactNonce uint64) error {
+func (db *Database) UpdateIncomingNonce(id common.Address, contactNonce uint64) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -342,7 +344,7 @@ func (db *Database) UpdateContactNonce(id common.Address, contactNonce uint64) e
 		return fmt.Errorf("user with id %s, not found", id.Hex())
 	}
 
-	u.LastNonce = contactNonce
+	u.IncomingNonce = contactNonce
 
 	db.contacts[id] = u
 
@@ -364,7 +366,7 @@ func (db *Database) UpdateContactNonce(id common.Address, contactNonce uint64) e
 	//TODO: change to map[string]Account for performance.
 	for i := range acc.Contacts {
 		if acc.Contacts[i].ID == id {
-			acc.Contacts[i].LastNonce = contactNonce
+			acc.Contacts[i].IncomingNonce = contactNonce
 			break
 		}
 	}

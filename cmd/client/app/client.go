@@ -132,14 +132,14 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 			}
 
 			//check nonce
-			expectedNonce := usr.LastNonce + 1
+			expectedNonce := usr.IncomingNonce + 1
 			if expectedNonce != inMsg.From.Nonce {
 				uiWriter("system", fmt.Sprintf("invalid nonce: got %d, expected %d", inMsg.From.Nonce, expectedNonce))
 				return
 			}
 
 			//update nonce to the new value
-			if err := c.db.UpdateContactNonce(inMsg.From.ID, expectedNonce); err != nil {
+			if err := c.db.UpdateIncomingNonce(inMsg.From.ID, expectedNonce); err != nil {
 				uiWriter("system", fmt.Sprintf("failed to update contact nonce: %s", err))
 				return
 			}
@@ -168,7 +168,7 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("lookup contact: %w", err)
 	}
 
-	nonce := usr.AppLastNonce + 1
+	nonce := usr.OutgoingNonce + 1
 
 	dataToSign := struct {
 		ToID      common.Address
@@ -203,7 +203,7 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("writing message to the conn: %w", err)
 	}
 
-	if err := c.db.UpdateAppNonce(to, nonce); err != nil {
+	if err := c.db.UpdateOutgoingNonce(to, nonce); err != nil {
 		return fmt.Errorf("updateAppNonce: %w", err)
 	}
 
