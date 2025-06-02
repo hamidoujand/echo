@@ -20,17 +20,17 @@ func main() {
 }
 
 func run() error {
-	id, privateKey, err := app.NewID(configDir)
+	id, err := app.NewID(configDir)
 	if err != nil {
 		return fmt.Errorf("newID: %w", err)
 	}
 
-	db, err := app.NewDatabase(configDir, id)
+	db, err := app.NewDatabase(configDir, id.Address)
 	if err != nil {
 		return fmt.Errorf("newDatabase: %w", err)
 	}
 
-	client := app.NewClient(id, privateKey, url, db)
+	client := app.NewClient(id, url, db)
 	defer client.Close()
 
 	a := app.New(client, db)

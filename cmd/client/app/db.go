@@ -23,10 +23,11 @@ type profile struct {
 type contact struct {
 	ID   common.Address `json:"id"`
 	Name string         `json:"name"`
-	// Nonces for messages YOU send to THIS contact.
+	// Nonce for messages YOU send to THIS contact.
 	OutgoingNonce uint64 `json:"outgoingNonce"`
-	// Nonces for messages THIS contact sends to YOU
+	// Nonce for messages THIS contact sends to YOU
 	IncomingNonce uint64 `json:"incomingNonce"`
+	Key           string `json:"key"`
 }
 
 type account struct {
@@ -39,6 +40,7 @@ type User struct {
 	Name          string
 	OutgoingNonce uint64
 	IncomingNonce uint64
+	Key           string
 	Messages      []string
 }
 
@@ -124,6 +126,7 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 			Name:          c.Name,
 			OutgoingNonce: c.OutgoingNonce,
 			IncomingNonce: c.IncomingNonce,
+			Key:           c.Key,
 		}
 	}
 
@@ -367,6 +370,55 @@ func (db *Database) UpdateIncomingNonce(id common.Address, contactNonce uint64) 
 	for i := range acc.Contacts {
 		if acc.Contacts[i].ID == id {
 			acc.Contacts[i].IncomingNonce = contactNonce
+			break
+		}
+	}
+
+	newData, err := json.Marshal(acc)
+	if err != nil {
+		return fmt.Errorf("encode updates: %w", err)
+	}
+
+	if err := os.WriteFile(fullPath, newData, 0644); err != nil {
+		return fmt.Errorf("write file %s: %w", fullPath, err)
+	}
+
+	return nil
+}
+
+func (db *Database) UpdateContactKey(id common.Address, key string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	//update the in-memory cache
+	u, ok := db.contacts[id]
+	if !ok {
+		return fmt.Errorf("user with id %s, not found", id.Hex())
+	}
+
+	u.Key = key
+
+	db.contacts[id] = u
+
+	//update the disk
+
+	fullPath := filepath.Join(db.dir, dbFilename)
+
+	// Read the entire db file first
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", fullPath, err)
+	}
+
+	var acc account
+	if err := json.Unmarshal(data, &acc); err != nil {
+		return fmt.Errorf("decode into account: %w", err)
+	}
+
+	//TODO: change to map[string]Account for performance.
+	for i := range acc.Contacts {
+		if acc.Contacts[i].ID == id {
+			acc.Contacts[i].Key = key
 			break
 		}
 	}
