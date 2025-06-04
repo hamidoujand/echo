@@ -58,7 +58,7 @@ func New(client *Client, db *Database) *App {
 			return
 		}
 		for i, msg := range usr.Messages {
-			fmt.Fprintln(textView, msg)
+			fmt.Fprintln(textView, string(msg))
 			if i < len(usr.Messages)-1 {
 				fmt.Fprintln(textView, "--------------------------------------")
 			}
@@ -181,7 +181,7 @@ func (a *App) buttonHandler() {
 
 	id := common.HexToAddress(receiverID)
 
-	if err := a.client.Send(id, msg); err != nil {
+	if err := a.client.Send(id, []byte(msg)); err != nil {
 		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
 		return
 	}

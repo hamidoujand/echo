@@ -2,7 +2,10 @@ package app
 
 import (
 	"bufio"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +30,7 @@ type contact struct {
 	OutgoingNonce uint64 `json:"outgoingNonce"`
 	// Nonce for messages THIS contact sends to YOU
 	IncomingNonce uint64 `json:"incomingNonce"`
-	Key           string `json:"key"`
+	Key           []byte `json:"key"`
 }
 
 type account struct {
@@ -40,8 +43,8 @@ type User struct {
 	Name          string
 	OutgoingNonce uint64
 	IncomingNonce uint64
-	Key           string
-	Messages      []string
+	Key           []byte
+	Messages      [][]byte
 }
 
 type Users struct {
@@ -121,6 +124,20 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 
 	contacts := make(map[common.Address]User, len(acc.Contacts))
 	for _, c := range acc.Contacts {
+		// var pk *rsa.PublicKey
+		// if c.Key != "" {
+		// 	block, _ := pem.Decode([]byte(c.Key))
+		// 	if block == nil {
+		// 		return nil, fmt.Errorf("decoding contact's public key into pem block: %w", err)
+		// 	}
+
+		// 	var err error
+		// 	pk, err = x509.ParsePKCS1PublicKey(block.Bytes)
+		// 	if err != nil {
+		// 		return nil, fmt.Errorf("parsing public key: %w", err)
+		// 	}
+
+		// }
 		contacts[c.ID] = User{
 			ID:            c.ID,
 			Name:          c.Name,
@@ -154,6 +171,12 @@ func (db *Database) LookupContact(id common.Address) (User, error) {
 	if !ok {
 		return User{}, fmt.Errorf("contact with id %s not found", id.String())
 	}
+
+	if len(usr.Messages) == 0 {
+		//read messages from disk
+
+	}
+
 	return usr, nil
 }
 
@@ -169,7 +192,7 @@ func (db *Database) Contacts() []User {
 	return users
 }
 
-func (db *Database) AddMessage(id common.Address, msg string) error {
+func (db *Database) AddMessage(id common.Address, msg []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -249,7 +272,7 @@ func (db *Database) ReadMessage(id common.Address) error {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		txt := scanner.Text()
+		txt := scanner.Bytes()
 		usr.Messages = append(usr.Messages, txt)
 	}
 
@@ -262,7 +285,7 @@ func (db *Database) ReadMessage(id common.Address) error {
 	return nil
 }
 
-func (db *Database) writeMessage(id common.Address, msg string) error {
+func (db *Database) writeMessage(id common.Address, msg []byte) error {
 	filename := filepath.Join(db.dir, chatHistoryDir, id.String()+".msg")
 	_, err := os.Stat(filename)
 	var f *os.File
@@ -282,7 +305,7 @@ func (db *Database) writeMessage(id common.Address, msg string) error {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString(msg); err != nil {
+	if _, err := f.Write(fmt.Appendf(nil, "%s\n", msg)); err != nil {
 		return fmt.Errorf("writeString: %w", err)
 	}
 	return nil
@@ -386,7 +409,7 @@ func (db *Database) UpdateIncomingNonce(id common.Address, contactNonce uint64) 
 	return nil
 }
 
-func (db *Database) UpdateContactKey(id common.Address, key string) error {
+func (db *Database) UpdateContactKey(id common.Address, key []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -433,4 +456,23 @@ func (db *Database) UpdateContactKey(id common.Address, key string) error {
 	}
 
 	return nil
+}
+
+func parseRSAPublicKey(key []byte) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode(key)
+	if block == nil {
+		return nil, errors.New("decoding contact's public key into pem block")
+	}
+
+	pk, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing public key: %w", err)
+	}
+
+	rsaPublicKey, ok := pk.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key is not a *rsa.PublicKey: %T", pk)
+	}
+
+	return rsaPublicKey, nil
 }

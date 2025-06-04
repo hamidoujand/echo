@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
@@ -22,14 +24,16 @@ type user struct {
 }
 
 type inMessage struct {
-	From user   `json:"from"`
-	Text string `json:"text"`
+	Encrypted bool   `json:"encrypted"`
+	From      user   `json:"from"`
+	Text      []byte `json:"text"`
 }
 
 type outMessage struct {
 	ToID      common.Address `json:"toID"`
-	Text      string         `json:"text"`
+	Text      []byte         `json:"text"`
 	FromNonce uint64         `json:"fromNonce"`
+	Encrypted bool           `json:"encrypted"`
 	V         *big.Int       `json:"v"`
 	R         *big.Int       `json:"r"`
 	S         *big.Int       `json:"s"`
@@ -143,27 +147,30 @@ func (c *Client) Handshake(name string, uiWriter UIWriter, updateContact UpdateC
 				return
 			}
 
-			inMsg, err = c.processReceivedMessages(inMsg)
+			decryptedMsg, encryptedMsg, err := c.processReceivedMessages(inMsg)
 			if err != nil {
 				uiWriter("system", fmt.Sprintf("failed to process received messages: %s", err))
 				return
 			}
 
-			formattedMsg := formatMessage(usr.Name, inMsg.Text)
+			if !bytes.HasPrefix(decryptedMsg, []byte("/")) {
+				uiDecryptedMsg := formatMessage(usr.Name, decryptedMsg)
+				dbEncryptedMsg := formatMessage(usr.Name, encryptedMsg)
 
-			if err := c.db.AddMessage(inMsg.From.ID, formattedMsg); err != nil {
-				uiWriter("system", fmt.Sprintf("failed to add message: %s", err))
-				return
+				if err := c.db.AddMessage(inMsg.From.ID, dbEncryptedMsg); err != nil {
+					uiWriter("system", fmt.Sprintf("failed to add message: %s", err))
+					return
+				}
+
+				uiWriter(inMsg.From.ID.Hex(), string(uiDecryptedMsg))
 			}
-
-			uiWriter(inMsg.From.ID.Hex(), formattedMsg)
 		}
 	}()
 
 	return nil
 }
 
-func (c *Client) Send(to common.Address, msg string) error {
+func (c *Client) Send(to common.Address, msg []byte) error {
 	if c.conn == nil {
 		return fmt.Errorf("no connection")
 	}
@@ -179,14 +186,21 @@ func (c *Client) Send(to common.Address, msg string) error {
 
 	nonce := usr.OutgoingNonce + 1
 
-	msg, err = c.processSendMessages(msg)
+	decryptedMsg, encryptedMsg, err := c.processSendMessages(usr, msg)
 	if err != nil {
 		return fmt.Errorf("processSendMessages: %w", err)
 	}
 
+	//default msg is decrypted
+	msg = decryptedMsg
+	isEncrypted := len(encryptedMsg) != 0
+	if isEncrypted {
+		msg = encryptedMsg
+	}
+
 	dataToSign := struct {
 		ToID      common.Address
-		Text      string
+		Text      []byte
 		FromNonce uint64
 	}{
 		ToID:      to,
@@ -203,6 +217,7 @@ func (c *Client) Send(to common.Address, msg string) error {
 		ToID:      to,
 		Text:      msg,
 		FromNonce: nonce,
+		Encrypted: isEncrypted,
 		V:         v,
 		R:         r,
 		S:         s,
@@ -221,60 +236,98 @@ func (c *Client) Send(to common.Address, msg string) error {
 		return fmt.Errorf("updateAppNonce: %w", err)
 	}
 
-	msg = formatMessage("You", msg)
-	if err := c.db.AddMessage(to, msg); err != nil {
-		return fmt.Errorf("addMessage: %w", err)
-	}
+	if !bytes.HasPrefix(decryptedMsg, []byte("/")) {
+		uiDecryptedMsg := formatMessage("You", decryptedMsg)
+		dbEncryptedMsg := formatMessage("You", encryptedMsg)
 
-	c.uiWriter(to.String(), msg)
+		if err := c.db.AddMessage(to, uiDecryptedMsg); err != nil {
+			return fmt.Errorf("addMessage: %w", err)
+		}
+
+		c.uiWriter(to.String(), string(dbEncryptedMsg))
+	}
 
 	return nil
 }
 
-func (c *Client) processSendMessages(msg string) (string, error) {
-	//not a command
-	if !strings.HasPrefix(msg, "/") {
-		return msg, nil
+func (c *Client) processSendMessages(usr User, msg []byte) ([]byte, []byte, error) {
+	//not a command, normal messages
+	if !bytes.HasPrefix(msg, []byte("/")) {
+		//usr does not have a key for encryption
+		if len(usr.Key) == 0 {
+			return msg, nil, nil
+		}
+
+		//usr does have a key, encrypt messages
+		pk, err := parseRSAPublicKey(usr.Key)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parseRSAPublicKey: %w", err)
+		}
+
+		encryptedData, err := rsa.EncryptPKCS1v15(rand.Reader, pk, msg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encrypt messages: %w", err)
+		}
+
+		return msg, encryptedData, nil
 	}
 
-	parts := strings.Split(msg, " ")
+	//its a command
+	msg = bytes.ToLower(msg)
+	msg = bytes.TrimSpace(msg)
+
+	parts := bytes.Split(msg, []byte(" "))
 	if len(parts) != 2 {
-		return "", fmt.Errorf("%s: invalid command formant: command must be in [/<cmd> <args>]", msg)
+		return nil, nil, fmt.Errorf("%s: invalid command formant: command must be in [/<cmd> <args>]", msg)
 	}
 
-	switch parts[0] {
-	case "/share":
-		switch parts[1] {
-		case "key":
+	switch {
+	case bytes.Equal(parts[0], []byte("/share")):
+		switch {
+		case bytes.Equal(parts[1], []byte("key")):
 			if c.id.RSAPublicKey == "" {
-				return "", errors.New("no key to share")
+				return nil, nil, errors.New("no key to share")
 			}
-			return fmt.Sprintf("/key %s", c.id.RSAPublicKey), nil
+
+			return fmt.Appendf(nil, "/key %s", c.id.RSAPublicKey), nil, nil
 		}
 	}
 
-	return "", fmt.Errorf("invalid command %s", msg)
+	return nil, nil, fmt.Errorf("invalid command %s", msg)
 }
 
-func (c *Client) processReceivedMessages(msg inMessage) (inMessage, error) {
+func (c *Client) processReceivedMessages(msg inMessage) ([]byte, []byte, error) {
 	text := msg.Text
-	//not a command
-	if !strings.HasPrefix(text, "/") {
-		return msg, nil
+	//not a command, normal message
+	if !bytes.HasPrefix(text, []byte("/")) {
+		//not encrypted
+		if !msg.Encrypted {
+			return text, nil, nil
+		}
+
+		//encrypted
+		decryptedData, err := rsa.DecryptPKCS1v15(rand.Reader, c.id.RSAKey, []byte(msg.Text))
+		if err != nil {
+			return nil, nil, fmt.Errorf("message decryption: %w", err)
+		}
+
+		return decryptedData, text, nil
 	}
 
-	parts := strings.SplitN(text, " ", 2)
+	//command
+	parts := bytes.SplitN(text, []byte(" "), 2)
 	if len(parts) != 2 {
-		return inMessage{}, fmt.Errorf("%s: invalid command formant: command must be in [/key <RSA_Public>]", text)
+		return nil, nil, fmt.Errorf("%s: invalid command formant: command must be in [/key <RSA_Public>]", text)
 	}
 
-	switch parts[0] {
-	case "/key":
+	switch {
+	case bytes.Equal(parts[0], []byte("/key")):
 		key := parts[1]
 		if err := c.db.UpdateContactKey(msg.From.ID, key); err != nil {
-			return inMessage{}, fmt.Errorf("updating contact key: %w", err)
+			return nil, nil, fmt.Errorf("updating contact key: %w", err)
 		}
+		return []byte("*** Updated the contact's key ***"), nil, nil
 	}
 
-	return inMessage{}, fmt.Errorf("invalid command %s", text)
+	return nil, nil, fmt.Errorf("invalid command %s", text)
 }

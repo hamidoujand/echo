@@ -25,16 +25,18 @@ type outgoingUser struct {
 
 type inMessage struct {
 	ToID      common.Address `json:"toID"`
-	Text      string         `json:"text"`
+	Text      []byte         `json:"text"`
 	FromNonce uint64         `json:"fromNonce"`
+	Encrypted bool           `json:"encrypted"`
 	V         *big.Int       `json:"v"`
 	R         *big.Int       `json:"r"`
 	S         *big.Int       `json:"s"`
 }
 
 type outMessage struct {
-	From outgoingUser `json:"from"`
-	Text string       `json:"text"`
+	Encrypted bool         `json:"encrypted"`
+	From      outgoingUser `json:"from"`
+	Text      []byte       `json:"text"`
 }
 
 type busMessage struct {
@@ -42,8 +44,9 @@ type busMessage struct {
 	FromID    common.Address `json:"fromID"`
 	FromName  string         `json:"fromName"`
 	ToID      common.Address `json:"toID"`
-	Text      string         `json:"text"`
+	Text      []byte         `json:"text"`
 	FromNonce uint64         `json:"fromNonce"`
+	Encrypted bool           `json:"encrypted"`
 	V         *big.Int       `json:"v"`
 	R         *big.Int       `json:"r"`
 	S         *big.Int       `json:"s"`

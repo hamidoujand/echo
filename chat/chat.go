@@ -177,11 +177,11 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 			continue
 		}
 
-		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage)
+		c.log.Info("received message", "from", usr.ID, "to", in.ToID, "msg type", websocket.TextMessage, "encrypted", in.Encrypted)
 
 		signedData := struct {
 			ToID      common.Address
-			Text      string
+			Text      []byte
 			FromNonce uint64
 		}{
 			ToID:      in.ToID,
@@ -211,6 +211,7 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 					ToID:      in.ToID,
 					Text:      in.Text,
 					FromNonce: in.FromNonce,
+					Encrypted: in.Encrypted,
 					V:         in.V,
 					R:         in.R,
 					S:         in.S,
@@ -224,7 +225,7 @@ func (c *Chat) Listen(ctx context.Context, usr User) {
 			continue
 		}
 
-		if err := c.sendMessage(usr, to, in.FromNonce, in.Text); err != nil {
+		if err := c.sendMessage(usr, to, in.FromNonce, in.Encrypted, in.Text); err != nil {
 			c.log.Error("sending message failed", "err", err)
 		}
 
@@ -250,11 +251,11 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 	if bm.CapID == c.capID {
 		return
 	}
-	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage)
+	c.log.Info("received message from BUS", "from", bm.FromID, "to", bm.ToID, "msg type", websocket.TextMessage, "encrypted", bm.Encrypted)
 
 	signedData := struct {
 		ToID      common.Address
-		Text      string
+		Text      []byte
 		FromNonce uint64
 	}{
 		ToID:      bm.ToID,
@@ -285,7 +286,7 @@ func (c *Chat) ListenBUS(msg jetstream.Msg) {
 		Name: bm.FromName,
 	}
 
-	if err := c.sendMessage(from, to, bm.FromNonce, bm.Text); err != nil {
+	if err := c.sendMessage(from, to, bm.FromNonce, bm.Encrypted, bm.Text); err != nil {
 		c.log.Error("listenBUS: sending message failed", "err", err)
 	}
 
@@ -380,10 +381,11 @@ func (c *Chat) readMessage(ctx context.Context, usr User) ([]byte, error) {
 	}
 }
 
-func (c *Chat) sendMessage(from User, to User, fromNonce uint64, msg string) error {
+func (c *Chat) sendMessage(from User, to User, fromNonce uint64, encrypted bool, msg []byte) error {
 	m := outMessage{
-		From: outgoingUser{ID: from.ID, Name: from.Name, Nonce: fromNonce},
-		Text: msg,
+		From:      outgoingUser{ID: from.ID, Name: from.Name, Nonce: fromNonce},
+		Text:      msg,
+		Encrypted: encrypted,
 	}
 
 	if err := to.Conn.WriteJSON(m); err != nil {
