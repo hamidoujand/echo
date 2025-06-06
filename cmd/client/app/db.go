@@ -10,13 +10,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
 const dbFilename = "data.json"
 const chatHistoryDir = "messages"
+
+type message struct {
+	Name      string    `json:"name"`
+	Text      []byte    `json:"text"`
+	Timestamp time.Time `json:"timestamp"`
+}
 
 type profile struct {
 	ID   common.Address `json:"id"`
@@ -44,7 +53,7 @@ type User struct {
 	OutgoingNonce uint64
 	IncomingNonce uint64
 	Key           []byte
-	Messages      [][]byte
+	Messages      []message
 }
 
 type Users struct {
@@ -124,20 +133,6 @@ func NewDatabase(confDir string, myAccountID common.Address) (*Database, error) 
 
 	contacts := make(map[common.Address]User, len(acc.Contacts))
 	for _, c := range acc.Contacts {
-		// var pk *rsa.PublicKey
-		// if c.Key != "" {
-		// 	block, _ := pem.Decode([]byte(c.Key))
-		// 	if block == nil {
-		// 		return nil, fmt.Errorf("decoding contact's public key into pem block: %w", err)
-		// 	}
-
-		// 	var err error
-		// 	pk, err = x509.ParsePKCS1PublicKey(block.Bytes)
-		// 	if err != nil {
-		// 		return nil, fmt.Errorf("parsing public key: %w", err)
-		// 	}
-
-		// }
 		contacts[c.ID] = User{
 			ID:            c.ID,
 			Name:          c.Name,
@@ -164,8 +159,8 @@ func (db *Database) MyAccount() User {
 }
 
 func (db *Database) LookupContact(id common.Address) (User, error) {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
+	db.mu.Lock()
+	defer db.mu.Unlock()
 
 	usr, ok := db.contacts[id]
 	if !ok {
@@ -174,7 +169,12 @@ func (db *Database) LookupContact(id common.Address) (User, error) {
 
 	if len(usr.Messages) == 0 {
 		//read messages from disk
-
+		msgs, err := readMessage(db.dir, usr.ID)
+		if err != nil {
+			return User{}, fmt.Errorf("readMessage: %w", err)
+		}
+		usr.Messages = msgs
+		db.contacts[id] = usr
 	}
 
 	return usr, nil
@@ -189,10 +189,15 @@ func (db *Database) Contacts() []User {
 		users = append(users, usr)
 	}
 
+	//sort
+	slices.SortFunc(users, func(a, b User) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	return users
 }
 
-func (db *Database) AddMessage(id common.Address, msg []byte) error {
+func (db *Database) AddMessage(id common.Address, msg message) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -250,42 +255,36 @@ func (db *Database) AddContact(id common.Address, name string) (User, error) {
 	return u, nil
 }
 
-func (db *Database) ReadMessage(id common.Address) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
+func readMessage(confDir string, id common.Address) ([]message, error) {
+	historyFile := filepath.Join(confDir, chatHistoryDir, id.Hex()+".msg")
 
-	historyFile := filepath.Join(db.dir, chatHistoryDir, id.Hex()+".msg")
-
-	usr, ok := db.contacts[id]
-	if !ok {
-		return fmt.Errorf("contact with id %s not found", id.String())
-	}
-
-	if len(usr.Messages) > 0 {
-		return nil
-	}
 	f, err := os.Open(historyFile)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 
+	var messages []message
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		txt := scanner.Bytes()
-		usr.Messages = append(usr.Messages, txt)
+		jsn := scanner.Bytes()
+
+		var msg message
+		if err := json.Unmarshal(jsn, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshaling json data into message: %w", err)
+		}
+		msg.Timestamp = msg.Timestamp.Local()
+		messages = append(messages, msg)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("while scanning file: %w", err)
+		return nil, fmt.Errorf("while scanning file: %w", err)
 	}
 
-	db.contacts[id] = usr
-
-	return nil
+	return messages, nil
 }
 
-func (db *Database) writeMessage(id common.Address, msg []byte) error {
+func (db *Database) writeMessage(id common.Address, msg message) error {
 	filename := filepath.Join(db.dir, chatHistoryDir, id.String()+".msg")
 	_, err := os.Stat(filename)
 	var f *os.File
@@ -305,9 +304,17 @@ func (db *Database) writeMessage(id common.Address, msg []byte) error {
 	}
 	defer f.Close()
 
-	if _, err := f.Write(fmt.Appendf(nil, "%s\n", msg)); err != nil {
+	jsn, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshalling message: %w", err)
+	}
+
+	jsn = append(jsn, '\n') //add new line manually.
+
+	if _, err := f.Write(jsn); err != nil {
 		return fmt.Errorf("writeString: %w", err)
 	}
+
 	return nil
 }
 

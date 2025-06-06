@@ -43,13 +43,6 @@ func New(client *Client, db *Database) *App {
 
 		commonID := common.HexToAddress(id)
 
-		err := db.ReadMessage(commonID)
-		if err != nil {
-			textView.ScrollToEnd()
-			fmt.Fprintln(textView, "--------------------------------------")
-			fmt.Fprintln(textView, "system: "+err.Error())
-		}
-
 		usr, err := db.LookupContact(commonID)
 		if err != nil {
 			textView.ScrollToEnd()
@@ -58,7 +51,7 @@ func New(client *Client, db *Database) *App {
 			return
 		}
 		for i, msg := range usr.Messages {
-			fmt.Fprintln(textView, string(msg))
+			fmt.Fprintln(textView, string(msg.Text))
 			if i < len(usr.Messages)-1 {
 				fmt.Fprintln(textView, "--------------------------------------")
 			}
@@ -133,13 +126,13 @@ func (a *App) Run() error {
 	return a.app.SetRoot(a.flex, true).EnableMouse(true).Run()
 }
 
-func (a *App) WriteMessage(id string, msg string) {
+func (a *App) WriteMessage(id string, msg message) {
 	a.textView.ScrollToEnd()
 
 	switch id {
 	case "system":
 		fmt.Fprintln(a.textView, "--------------------------------------")
-		fmt.Fprintln(a.textView, msg)
+		fmt.Fprintf(a.textView, "%s: %s\n", msg.Name, string(msg.Text))
 	default:
 		idx := a.list.GetCurrentItem()
 		_, currentID := a.list.GetItemText(idx)
@@ -151,7 +144,7 @@ func (a *App) WriteMessage(id string, msg string) {
 
 		if id == currentID {
 			fmt.Fprintln(a.textView, "--------------------------------------")
-			fmt.Fprintln(a.textView, msg)
+			fmt.Fprintf(a.textView, "%s: %s\n", msg.Name, string(msg.Text))
 			return
 		}
 
@@ -182,7 +175,11 @@ func (a *App) buttonHandler() {
 	id := common.HexToAddress(receiverID)
 
 	if err := a.client.Send(id, []byte(msg)); err != nil {
-		a.WriteMessage("system", fmt.Sprintf("sending message failed: %s", err))
+		msg := message{
+			Name: "system",
+			Text: fmt.Appendf(nil, "sending message failed: %s", err),
+		}
+		a.WriteMessage("system", msg)
 		return
 	}
 
