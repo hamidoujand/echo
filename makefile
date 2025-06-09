@@ -12,10 +12,7 @@ upgrade:
 
 
 client:
-	go run cmd/client/main.go 
-
-hack:
-	go run cmd/hack/main.go
+	go run tui/main.go 
 
 ###############################################################################
 # Docker 
